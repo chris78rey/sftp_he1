@@ -29,7 +29,7 @@ def healthz():
 
 @app.get("/")
 def home():
-    return render_template("index.html", defaults=Settings, diagnostics={})
+    return render_template("index.html", defaults=Settings, diagnostics={}, last_id="")
 
 
 @app.get("/diagnostics")
@@ -45,15 +45,15 @@ def preview():
     raw = (request.form.get("dig_id_tramite") or "").strip()
     if not raw.isdigit():
         flash("DIG_ID_TRAMITE debe ser numérico.", "error")
-        return render_template("index.html", defaults=Settings)
+        return render_template("index.html", defaults=Settings, last_id=raw)
     try:
         preview_data = build_preview(int(raw))
         if int(preview_data.get("count") or 0) == 0:
             flash("No se encontraron carpetas para ese DIG_ID_TRAMITE.", "error")
-        return render_template("index.html", defaults=Settings, preview=preview_data)
+        return render_template("index.html", defaults=Settings, preview=preview_data, last_id=raw)
     except Exception as exc:
         flash(f"Error consultando Oracle: {exc}", "error")
-        return render_template("index.html", defaults=Settings)
+        return render_template("index.html", defaults=Settings, last_id=raw)
 
 
 @app.post("/start")
@@ -94,3 +94,15 @@ def job_download(job_id: str):
     if not zip_path.exists() or not zip_path.is_file():
         abort(404)
     return send_file(str(zip_path), as_attachment=True, download_name=zip_path.name, mimetype="application/zip")
+@app.template_filter("human_bytes")
+def human_bytes(value: int | float | None) -> str:
+    try:
+        n = float(value or 0)
+    except Exception:
+        n = 0.0
+    units = ["B", "KB", "MB", "GB", "TB"]
+    i = 0
+    while n >= 1024 and i < len(units) - 1:
+        n /= 1024.0
+        i += 1
+    return ("%0.1f %s" % (n, units[i])).replace(".0 ", " ")

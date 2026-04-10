@@ -7,6 +7,10 @@
   {% if auto_refresh %}<meta http-equiv="refresh" content="4">{% endif %}
   <style>
     body { font-family: Arial, sans-serif; background:#f6f8fb; margin:0; color:#0f172a; }
+    .nav { background:#0f172a; color:#e2e8f0; }
+    .nav .inner { max-width:1280px; margin:0 auto; padding:10px 16px; display:flex; gap:16px; align-items:center; }
+    .nav a { color:#e2e8f0; text-decoration:none; padding:6px 10px; border-radius:6px; }
+    .nav a:hover { background:rgba(255,255,255,0.08); }
     .wrap { max-width:1280px; margin:20px auto; padding:0 16px; }
     .card { background:#fff; border:1px solid #dbe3ef; border-radius:12px; padding:18px; margin-bottom:16px; }
     .grid { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:14px; }
@@ -17,6 +21,7 @@
     button.secondary, a.secondary { background:#334155; }
     table { width:100%; border-collapse:collapse; font-size:14px; }
     th,td { padding:10px; border-bottom:1px solid #e5e7eb; text-align:left; vertical-align:top; }
+    tbody tr:nth-child(odd) { background:#fafafa; }
     code { background:#f1f5f9; padding:2px 6px; border-radius:6px; }
     pre { background:#0f172a; color:#e2e8f0; padding:14px; border-radius:10px; overflow:auto; }
     .progress { width:100%; height:22px; background:#e2e8f0; border-radius:999px; overflow:hidden; margin-top:10px; }
@@ -25,5 +30,11 @@
     .muted { color:#64748b; }
   </style>
 </head>
-<body><div class="wrap">{% block content %}{% endblock %}</div></body>
+<body>
+<div class="nav"><div class="inner">
+  <a href="/">Inicio</a>
+  <a href="/diagnostics">Diagnóstico</a>
+</div></div>
+<div class="wrap">{% block content %}{% endblock %}</div>
+</body>
 </html>

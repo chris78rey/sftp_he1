@@ -14,11 +14,16 @@
   {% if job.status == 'finished' and job.report %}
     <p><b>Base remota detectada:</b> <code>{{ job.report.remote_base_detected }}</code></p>
     <p><b>Total archivos:</b> {{ job.report.total_files }}</p>
-    <p><b>Total bytes:</b> {{ job.report.total_bytes }}</p>
-    <p><a class="btn" href="/jobs/{{ job.job_id_value }}/download">Descargar ZIP</a> <a class="btn secondary" href="/">Volver</a></p>
+    <p><b>Total bytes:</b> {{ job.report.total_bytes | human_bytes }}</p>
+    <p><b>ZIP:</b> <code id="zipPath">{{ job.report.zip_path }}</code></p>
+    <p>
+      <a class="btn" href="/jobs/{{ job.job_id_value }}/download">Descargar ZIP</a>
+      <a class="btn secondary" href="#" onclick="navigator.clipboard.writeText(document.getElementById('zipPath').innerText);return false;">Copiar ruta ZIP</a>
+      <a class="btn secondary" href="/">Volver</a>
+    </p>
   {% endif %}
   {% if job.status == 'failed' %}<pre>{{ job.traceback or job.error }}</pre>{% endif %}
-  {% if job.log_lines %}<h3>Bitácora</h3><pre>{% for line in job.log_lines %}{{ line }}
-{% endfor %}</pre>{% endif %}
+  {% if job.log_lines %}<h3>Bitácora</h3><details open><summary>Mostrar/Ocultar</summary><pre>{% for line in job.log_lines %}{{ line }}
+{% endfor %}</pre></details>{% endif %}
 </div>
 {% endblock %}

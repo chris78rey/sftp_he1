@@ -9,7 +9,7 @@
   {% endwith %}
   <form method="post" action="/preview">
     <div class="grid">
-      <div><label>DIG_ID_TRAMITE</label><input type="text" name="dig_id_tramite" placeholder="Ejemplo: 16356"></div>
+      <div><label>DIG_ID_TRAMITE</label><input type="text" name="dig_id_tramite" placeholder="Ejemplo: 16356" value="{{ last_id or '' }}"></div>
       <div><label>Oracle destino</label><input type="text" value="{{ defaults.ORACLE_TARGETS }}" readonly></div>
       <div><label>SFTP destino</label><input type="text" value="{{ defaults.SFTP_HOST }}:{{ defaults.SFTP_PORT }} | {{ defaults.SFTP_REMOTE_BASE }}" readonly></div>
     </div>
