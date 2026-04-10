@@ -10,8 +10,5 @@ __pycache__/
 # Build/output artifacts
 output/
 
-# JDBC driver binary
-jdbc/ojdbc8.jar
-
 # Misc local files
 repomix-output.xml
