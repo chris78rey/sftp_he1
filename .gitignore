@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Local env and secrets
+.env
+
+# Build/output artifacts
+output/
+
+# JDBC driver binary
+jdbc/ojdbc8.jar
+
+# Misc local files
+repomix-output.xml

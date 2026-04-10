@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% set auto_refresh = job.status in ['queued', 'running'] %}
+{% block content %}
+<h1>Estado de descarga</h1>
+<div class="card">
+  <p><b>Job:</b> {{ job.job_id_value }}</p>
+  <p><b>DIG_ID_TRAMITE:</b> {{ job.dig_id_tramite }}</p>
+  <p><b>Estado:</b> {{ job.status }}</p>
+  <p><b>Último mensaje:</b> {{ job.last_message or '-' }}</p>
+  {% if job.status in ['queued', 'running'] %}
+    <p class="muted">La página se refresca automáticamente cada 4 segundos.</p>
+    <div class="progress"><div style="width: {{ progress_pct }}%;">{{ progress_pct }}%</div></div>
+  {% endif %}
+  {% if job.status == 'finished' and job.report %}
+    <p><b>Base remota detectada:</b> <code>{{ job.report.remote_base_detected }}</code></p>
+    <p><b>Total archivos:</b> {{ job.report.total_files }}</p>
+    <p><b>Total bytes:</b> {{ job.report.total_bytes }}</p>
+    <p><a class="btn" href="/jobs/{{ job.job_id_value }}/download">Descargar ZIP</a> <a class="btn secondary" href="/">Volver</a></p>
+  {% endif %}
+  {% if job.status == 'failed' %}<pre>{{ job.traceback or job.error }}</pre>{% endif %}
+  {% if job.log_lines %}<h3>Bitácora</h3><pre>{% for line in job.log_lines %}{{ line }}
+{% endfor %}</pre>{% endif %}
+</div>
+{% endblock %}

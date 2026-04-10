@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <title>{{ title or "SFTP HE1" }}</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  {% if auto_refresh %}<meta http-equiv="refresh" content="4">{% endif %}
+  <style>
+    body { font-family: Arial, sans-serif; background:#f6f8fb; margin:0; color:#0f172a; }
+    .wrap { max-width:1280px; margin:20px auto; padding:0 16px; }
+    .card { background:#fff; border:1px solid #dbe3ef; border-radius:12px; padding:18px; margin-bottom:16px; }
+    .grid { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:14px; }
+    label { display:block; font-weight:bold; margin-bottom:6px; }
+    input { width:100%; box-sizing:border-box; padding:10px; border:1px solid #cbd5e1; border-radius:8px; }
+    .actions { display:flex; gap:12px; margin-top:18px; }
+    button, a.btn { background:#0f766e; color:#fff; border:0; padding:10px 14px; border-radius:8px; text-decoration:none; cursor:pointer; display:inline-block; }
+    button.secondary, a.secondary { background:#334155; }
+    table { width:100%; border-collapse:collapse; font-size:14px; }
+    th,td { padding:10px; border-bottom:1px solid #e5e7eb; text-align:left; vertical-align:top; }
+    code { background:#f1f5f9; padding:2px 6px; border-radius:6px; }
+    pre { background:#0f172a; color:#e2e8f0; padding:14px; border-radius:10px; overflow:auto; }
+    .progress { width:100%; height:22px; background:#e2e8f0; border-radius:999px; overflow:hidden; margin-top:10px; }
+    .progress > div { height:100%; background:#0f766e; color:#fff; line-height:22px; text-align:center; font-size:12px; }
+    .error { color:#b91c1c; }
+    .muted { color:#64748b; }
+  </style>
+</head>
+<body><div class="wrap">{% block content %}{% endblock %}</div></body>
+</html>

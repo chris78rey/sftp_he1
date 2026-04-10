@@ -1,0 +1,12 @@
+services:
+  sftp_he1:
+    build: .
+    container_name: sftp_he1
+    restart: unless-stopped
+    env_file:
+      - .env
+    ports:
+      - "5085:5085"
+    volumes:
+      - ./output:/app/output
+      - ./jdbc:/app/jdbc:ro

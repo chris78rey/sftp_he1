@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Descarga SFTP por DIG_ID_TRAMITE</h1>
+<div class="card">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}<p class="{{ 'error' if category == 'error' else '' }}">{{ message }}</p>{% endfor %}
+    {% endif %}
+  {% endwith %}
+  <form method="post" action="/preview">
+    <div class="grid">
+      <div><label>DIG_ID_TRAMITE</label><input type="text" name="dig_id_tramite" placeholder="Ejemplo: 16356"></div>
+      <div><label>Oracle destino</label><input type="text" value="{{ defaults.ORACLE_TARGETS }}" readonly></div>
+      <div><label>SFTP destino</label><input type="text" value="{{ defaults.SFTP_HOST }}:{{ defaults.SFTP_PORT }} | {{ defaults.SFTP_REMOTE_BASE }}" readonly></div>
+    </div>
+    <div class="actions"><button type="submit">Previsualizar</button></div>
+  </form>
+</div>
+<div class="card">
+  <h2>Diagnóstico</h2>
+  <p><a class="btn secondary" href="/diagnostics">Ver JSON de diagnóstico</a></p>
+</div>
+{% if preview %}
+<div class="card">
+  <h2>Previsualización</h2>
+  <p><b>Carpetas encontradas:</b> {{ preview.count }}</p>
+  <form method="post" action="/start"><input type="hidden" name="dig_id_tramite" value="{{ preview.dig_id_tramite }}"><button type="submit">Iniciar descarga</button></form>
+  <table>
+    <thead><tr><th>DIG_TRAMITE</th><th>AÑO</th><th>EXPEDIENTE</th><th>AREA</th><th>RUTA</th></tr></thead>
+    <tbody>{% for row in preview.items %}<tr><td>{{ row.dig_tramite }}</td><td>{{ row.dig_anio }}</td><td>{{ row.dig_expediente }}</td><td>{{ row.dig_area_dep }}</td><td><code>{{ row.remote_rel_path }}</code></td></tr>{% endfor %}</tbody>
+  </table>
+</div>
+{% endif %}
+{% endblock %}
