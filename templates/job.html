@@ -6,6 +6,7 @@
   <p><b>Job:</b> {{ job.job_id_value }}</p>
   <p><b>DIG_ID_TRAMITE:</b> {{ job.dig_id_tramite }}</p>
   <p><b>Estado:</b> {{ job.status }}</p>
+  <p><b>Duración:</b> {{ duration_text(job) }}</p>
   <p><b>Último mensaje:</b> {{ job.last_message or '-' }}</p>
   {% if job.status in ['queued', 'running'] %}
     <p class="muted">La página se refresca automáticamente cada 4 segundos.</p>

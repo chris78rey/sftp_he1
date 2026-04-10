@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card" style="max-width:420px;margin:40px auto;">
+  <h1>Ingreso</h1>
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}<p class="{{ 'error' if category == 'error' else 'flash-ok' }}">{{ message }}</p>{% endfor %}
+    {% endif %}
+  {% endwith %}
+  <form method="post">
+    <div style="margin-bottom:14px;">
+      <label>Usuario</label>
+      <input type="text" name="username" placeholder="Leticia" autofocus>
+    </div>
+    <div style="margin-bottom:14px;">
+      <label>Clave</label>
+      <input type="password" name="password" placeholder="Clave de acceso">
+    </div>
+    <button type="submit">Entrar</button>
+  </form>
+</div>
+{% endblock %}

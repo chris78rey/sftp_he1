@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Administración</h1>
+<div class="card">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}<p class="{{ 'error' if category == 'error' else 'flash-ok' }}">{{ message }}</p>{% endfor %}
+    {% endif %}
+  {% endwith %}
+  <p><b>Ruta de salida:</b> <code>{{ output_root }}</code></p>
+  <p><b>PDFs encontrados:</b> {{ pdf_count }}</p>
+  <p><b>ZIPs encontrados:</b> {{ zip_count }}</p>
+  <p><b>Espacio ocupado por PDFs:</b> {{ total_bytes | human_bytes }}</p>
+  <p><b>Espacio total en output:</b> {{ total_output_bytes | human_bytes }}</p>
+  <form method="post" action="/admin/cleanup-pdfs" onsubmit="return confirm('¿Eliminar todos los PDFs generados en output?');">
+    <button type="submit">Limpiar PDFs</button>
+  </form>
+  <form method="post" action="/admin/cleanup-output" onsubmit="return confirm('¿Eliminar TODO el contenido de output?');" style="margin-top:12px;">
+    <button type="submit" style="background:#b91c1c;">Limpiar todo output</button>
+  </form>
+</div>
+{% endblock %}

@@ -20,6 +20,36 @@
   <h2>Diagnóstico</h2>
   <p><a class="btn secondary" href="/diagnostics">Ver JSON de diagnóstico</a></p>
 </div>
+{% if active_job %}
+<div class="card">
+  <h2>Trabajo activo</h2>
+  <p><b>Job:</b> {{ active_job.job_id_value }}</p>
+  <p><b>Trámite:</b> {{ active_job.dig_id_tramite }}</p>
+  <p><b>Estado:</b> {{ active_job.status }}</p>
+  <p><b>Duración:</b> {{ duration_text(active_job) }}</p>
+  <p><b>Mensaje:</b> {{ active_job.last_message or '-' }}</p>
+  <p><a class="btn secondary" href="/jobs/{{ active_job.job_id_value }}">Ver detalle</a></p>
+</div>
+{% endif %}
+{% if jobs %}
+<div class="card">
+  <h2>Cola de trabajos</h2>
+  <table>
+    <thead><tr><th>Job</th><th>Trámite</th><th>Estado</th><th>Duración</th><th>Mensaje</th></tr></thead>
+    <tbody>
+      {% for job in jobs[:10] %}
+      <tr>
+        <td><a href="/jobs/{{ job.job_id_value }}">{{ job.job_id_value }}</a></td>
+        <td>{{ job.dig_id_tramite }}</td>
+        <td>{{ job.status }}</td>
+        <td>{{ duration_text(job) }}</td>
+        <td>{{ job.last_message or '-' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endif %}
 {% if preview %}
 <div class="card">
   <h2>Previsualización</h2>

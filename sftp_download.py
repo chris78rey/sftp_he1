@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import posixpath
 import stat
+import shutil
 import time
 import zipfile
 from pathlib import Path
@@ -119,6 +120,52 @@ def _zip_dir(src_dir: Path, zip_path: Path) -> None:
                 zf.write(path, arcname=path.relative_to(src_dir))
 
 
+def cleanup_job_artifacts(job_root: str | Path | None) -> None:
+    if not job_root:
+        return
+    path = Path(job_root)
+    try:
+        if path.exists():
+            shutil.rmtree(path, ignore_errors=True)
+    except Exception:
+        pass
+
+
+def _connect_sftp_with_retry(*, attempts: int = 3, delay_seconds: float = 2.0, timeout: int = 30, log_cb=None):
+    last_exc = None
+    for attempt in range(1, attempts + 1):
+        if log_cb:
+            log_cb(f"Intento de conexión SFTP {attempt}/{attempts} ...")
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        try:
+            ssh.connect(
+                hostname=Settings.SFTP_HOST,
+                port=Settings.SFTP_PORT,
+                username=Settings.SFTP_USER,
+                password=Settings.SFTP_PASSWORD,
+                timeout=timeout,
+                banner_timeout=timeout,
+                auth_timeout=timeout,
+                look_for_keys=False,
+                allow_agent=False,
+            )
+            return ssh, ssh.open_sftp()
+        except Exception as exc:
+            last_exc = exc
+            if log_cb:
+                log_cb(f"Fallo en conexión SFTP {attempt}/{attempts}: {exc}")
+            try:
+                ssh.close()
+            except Exception:
+                pass
+            if attempt < attempts:
+                if log_cb:
+                    log_cb(f"Reintentando en {delay_seconds} s ...")
+                time.sleep(delay_seconds)
+    raise RuntimeError(f"No se pudo conectar a SFTP tras {attempts} intento(s): {last_exc}")
+
+
 def sftp_diagnostics() -> dict:
     started = time.perf_counter()
     result = {
@@ -127,21 +174,8 @@ def sftp_diagnostics() -> dict:
         "user": Settings.SFTP_USER,
         "base": Settings.SFTP_REMOTE_BASE,
     }
-    ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     try:
-        ssh.connect(
-            hostname=Settings.SFTP_HOST,
-            port=Settings.SFTP_PORT,
-            username=Settings.SFTP_USER,
-            password=Settings.SFTP_PASSWORD,
-            timeout=10,
-            banner_timeout=10,
-            auth_timeout=10,
-            look_for_keys=False,
-            allow_agent=False,
-        )
-        sftp = ssh.open_sftp()
+        ssh, sftp = _connect_sftp_with_retry(attempts=2, delay_seconds=1.0, timeout=10)
         try:
             result.update({"ok": True, "elapsed_ms": round((time.perf_counter() - started) * 1000, 1), "cwd": sftp.getcwd()})
         finally:
@@ -171,14 +205,11 @@ def run_download(dig_id_tramite: int, *, progress_cb=None, log_cb=None) -> dict:
     manifest_path = (job_root / "manifest.json").resolve()
 
     data_root.mkdir(parents=True, exist_ok=True)
-    ssh = paramiko.SSHClient()
-    ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
     sftp = None
     try:
         if log_cb:
             log_cb(f"Conectando a SFTP {Settings.SFTP_HOST}:{Settings.SFTP_PORT} ...")
-        ssh.connect(hostname=Settings.SFTP_HOST, port=Settings.SFTP_PORT, username=Settings.SFTP_USER, password=Settings.SFTP_PASSWORD, timeout=30, banner_timeout=30, auth_timeout=30, look_for_keys=False, allow_agent=False)
-        sftp = ssh.open_sftp()
+        ssh, sftp = _connect_sftp_with_retry(attempts=3, delay_seconds=2.0, timeout=30, log_cb=log_cb)
         detected_base, probes = _pick_remote_base(sftp, Settings.SFTP_REMOTE_BASE, items)
         if log_cb:
             log_cb(f"Base remota detectada: {detected_base!r}")

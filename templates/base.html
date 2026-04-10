@@ -28,12 +28,21 @@
     .progress > div { height:100%; background:#0f766e; color:#fff; line-height:22px; text-align:center; font-size:12px; }
     .error { color:#b91c1c; }
     .muted { color:#64748b; }
+    .topbar { display:flex; justify-content:space-between; align-items:center; gap:12px; width:100%; }
+    .pill { padding:4px 10px; border-radius:999px; background:#1e293b; color:#e2e8f0; font-size:12px; }
+    .flash-ok { color:#166534; }
   </style>
 </head>
 <body>
-<div class="nav"><div class="inner">
-  <a href="/">Inicio</a>
-  <a href="/diagnostics">Diagnóstico</a>
+<div class="nav"><div class="inner topbar">
+  <div style="display:flex; gap:12px; align-items:center;">
+    <a href="/">Inicio</a>
+    <a href="/diagnostics">Diagnóstico</a>
+    <a href="/admin">Admin</a>
+  </div>
+  <div style="display:flex; gap:10px; align-items:center;">
+    {% if session.get("username") %}<span class="pill">{{ session.get("username") }}</span><a href="/logout">Salir</a>{% endif %}
+  </div>
 </div></div>
 <div class="wrap">{% block content %}{% endblock %}</div>
 </body>

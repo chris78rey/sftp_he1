@@ -1,0 +1,16 @@
+[Unit]
+Description=SFTP HE1
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/data_nuevo/flask_sftp/sftp_he1
+EnvironmentFile=/data_nuevo/flask_sftp/sftp_he1/.env
+ExecStart=/data_nuevo/flask_sftp/sftp_he1/.venv/bin/python /data_nuevo/flask_sftp/sftp_he1/run_local.py
+Restart=on-failure
+RestartSec=3
+User=red_gestion
+Group=red_gestion
+
+[Install]
+WantedBy=multi-user.target

@@ -11,10 +11,12 @@ load_dotenv(BASE_DIR / ".env")
 
 class Settings:
     FLASK_SECRET_KEY = os.environ.get("FLASK_SECRET_KEY", "dev-secret")
+    ADMIN_USER = os.environ.get("ADMIN_USER", "Leticia").strip()
+    ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "7eticia1234").strip()
 
     ORACLE_USER = os.environ.get("ORACLE_USER", "").strip()
     ORACLE_PASSWORD = os.environ.get("ORACLE_PASSWORD", "").strip()
-    ORACLE_JDBC_JAR = os.environ.get("ORACLE_JDBC_JAR", "/app/jdbc/ojdbc8.jar").strip()
+    ORACLE_JDBC_JAR = os.environ.get("ORACLE_JDBC_JAR", str(BASE_DIR / "jdbc" / "ojdbc8.jar")).strip()
     ORACLE_TARGETS = os.environ.get("ORACLE_TARGETS", "").strip()
     ORACLE_OWNER = os.environ.get("ORACLE_OWNER", "DIGITALIZACION").strip().upper()
     ORACLE_TABLE = os.environ.get("ORACLE_TABLE", "DIGITALIZACION").strip().upper()
@@ -28,3 +30,6 @@ class Settings:
     DOWNLOAD_OUTPUT_ROOT = Path(
         os.environ.get("DOWNLOAD_OUTPUT_ROOT", str(BASE_DIR / "output"))
     ).expanduser().resolve()
+
+    APP_HOST = os.environ.get("APP_HOST", "127.0.0.1").strip()
+    APP_PORT = int(os.environ.get("APP_PORT", "5085"))
