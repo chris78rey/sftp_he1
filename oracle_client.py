@@ -128,8 +128,8 @@ def fetch_items_by_dig_id_tramite(dig_id_tramite: int) -> list[FolderItem]:
               FROM {Settings.ORACLE_OWNER}.{Settings.ORACLE_TABLE}
              WHERE DIG_ID_TRAMITE = ?
                AND DIG_TRAMITE IS NOT NULL
-               AND NVL(TRIM(DIG_ANIO), '') <> ''
-               AND NVL(TRIM(DIG_EXPEDIENTE), '') <> ''
+               AND (TRIM(DIG_ANIO) IS NOT NULL AND LENGTH(TRIM(DIG_ANIO)) > 0)
+               AND (TRIM(DIG_EXPEDIENTE) IS NOT NULL AND LENGTH(TRIM(DIG_EXPEDIENTE)) > 0)
              ORDER BY DIG_ANIO, DIG_EXPEDIENTE, DIG_TRAMITE
         """
         cur.execute(sql, [int(dig_id_tramite)])
