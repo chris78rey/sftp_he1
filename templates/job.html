@@ -4,7 +4,7 @@
 <h1>Estado de descarga</h1>
 <div class="card">
   <p><b>Job:</b> {{ job.job_id_value }}</p>
-  <p><b>DIG_ID_TRAMITE:</b> {{ job.dig_id_tramite }}</p>
+  <p><b>Búsqueda:</b> {% if job.search_mode == 'dig_tramite' %}DIG_TRAMITE{% else %}DIG_ID_TRAMITE{% endif %} = {{ job.search_value or job.dig_id_tramite }}</p>
   <p><b>Estado:</b> {{ job.status }}</p>
   <p><b>Duración:</b> {{ duration_text(job) }}</p>
   <p><b>Último mensaje:</b> {{ job.last_message or '-' }}</p>

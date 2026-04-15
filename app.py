@@ -62,6 +62,18 @@ def _duration_text(job: dict | None) -> str:
     return f"{hours}h {mins}m {secs}s" if hours else f"{mins}m {secs}s"
 
 
+def _search_mode_label(mode: str | None) -> str:
+    if (mode or "").strip() == "dig_tramite":
+        return "DIG_TRAMITE"
+    return "DIG_ID_TRAMITE"
+
+
+def _extract_search(form) -> tuple[str, str]:
+    mode = (form.get("search_mode") or "dig_id_tramite").strip()
+    value = (form.get("search_value") or form.get("dig_id_tramite") or "").strip()
+    return mode, value
+
+
 @app.get("/healthz")
 def healthz():
     return {"ok": True}, 200
@@ -96,7 +108,7 @@ def home():
             jobs.append(dict(job))
     jobs.sort(key=lambda j: j.get("created_at") or "", reverse=True)
     active = next((j for j in jobs if j.get("status") in {"waiting", "running"}), None)
-    return render_template("index.html", defaults=Settings, diagnostics={}, last_id="", username=session.get("username"), jobs=jobs, active_job=active, duration_text=_duration_text)
+    return render_template("index.html", defaults=Settings, diagnostics={}, last_search_mode="dig_id_tramite", last_search_value="", username=session.get("username"), jobs=jobs, active_job=active, duration_text=_duration_text)
 
 
 @app.get("/admin")
@@ -190,37 +202,36 @@ def diagnostics():
 @app.post("/preview")
 @login_required
 def preview():
-    raw = (request.form.get("dig_id_tramite") or "").strip()
+    search_mode, raw = _extract_search(request.form)
     if not raw.isdigit():
-        flash("DIG_ID_TRAMITE debe ser numérico.", "error")
-        return render_template("index.html", defaults=Settings, last_id=raw)
+        flash(f"{_search_mode_label(search_mode)} debe ser numérico.", "error")
+        return render_template("index.html", defaults=Settings, last_search_mode=search_mode, last_search_value=raw)
     try:
-        preview_data = build_preview(int(raw))
+        preview_data = build_preview(search_mode, raw)
         if int(preview_data.get("count") or 0) == 0:
-            flash("No se encontraron carpetas para ese DIG_ID_TRAMITE.", "error")
-        return render_template("index.html", defaults=Settings, preview=preview_data, last_id=raw)
+            flash(f"No se encontraron carpetas para ese {_search_mode_label(preview_data.get('search_mode'))}.", "error")
+        return render_template("index.html", defaults=Settings, preview=preview_data, last_search_mode=preview_data.get("search_mode"), last_search_value=raw)
     except Exception as exc:
         flash(f"Error consultando Oracle: {exc}", "error")
-        return render_template("index.html", defaults=Settings, last_id=raw)
+        return render_template("index.html", defaults=Settings, last_search_mode=search_mode, last_search_value=raw)
 
 
 @app.post("/start")
 @login_required
 def start():
-    raw = (request.form.get("dig_id_tramite") or "").strip()
+    search_mode, raw = _extract_search(request.form)
     if not raw.isdigit():
-        flash("DIG_ID_TRAMITE debe ser numérico.", "error")
-        return render_template("index.html", defaults=Settings)
-    dig_id_tramite = int(raw)
+        flash(f"{_search_mode_label(search_mode)} debe ser numérico.", "error")
+        return render_template("index.html", defaults=Settings, last_search_mode=search_mode, last_search_value=raw)
     try:
-        preview_data = build_preview(dig_id_tramite)
+        preview_data = build_preview(search_mode, raw)
         if int(preview_data.get("count") or 0) == 0:
-            flash("No se encontraron carpetas para ese DIG_ID_TRAMITE.", "error")
-            return render_template("index.html", defaults=Settings, preview=preview_data)
+            flash(f"No se encontraron carpetas para ese {_search_mode_label(preview_data.get('search_mode'))}.", "error")
+            return render_template("index.html", defaults=Settings, preview=preview_data, last_search_mode=preview_data.get("search_mode"), last_search_value=raw)
     except Exception as exc:
         flash(f"Error consultando Oracle: {exc}", "error")
-        return render_template("index.html", defaults=Settings)
-    job_id = create_job(dig_id_tramite, preview_data)
+        return render_template("index.html", defaults=Settings, last_search_mode=search_mode, last_search_value=raw)
+    job_id = create_job(str(preview_data.get("search_mode") or search_mode), raw, preview_data)
     run_job_async(job_id)
     return redirect(url_for("job_view", job_id=job_id))
 

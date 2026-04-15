@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>Descarga SFTP por DIG_ID_TRAMITE</h1>
+<h1>Descarga de documentos SFTP</h1>
 <div class="card">
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
@@ -9,7 +9,24 @@
   {% endwith %}
   <form method="post" action="/preview">
     <div class="grid">
-      <div><label>DIG_ID_TRAMITE</label><input type="text" name="dig_id_tramite" placeholder="Ejemplo: 16356" value="{{ last_id or '' }}"></div>
+      <div>
+        <label>Buscar por</label>
+        <div style="display:flex; flex-direction:column; gap:8px; padding:10px 0;">
+          <label style="font-weight:normal; display:flex; gap:8px; align-items:center; margin:0;">
+            <input type="radio" name="search_mode" value="dig_id_tramite" {% if (last_search_mode or 'dig_id_tramite') == 'dig_id_tramite' %}checked{% endif %} style="width:auto;">
+            <span><b>ID de trámite</b></span>
+          </label>
+          <label style="font-weight:normal; display:flex; gap:8px; align-items:center; margin:0;">
+            <input type="radio" name="search_mode" value="dig_tramite" {% if last_search_mode == 'dig_tramite' %}checked{% endif %} style="width:auto;">
+            <span><b>Trámite</b></span>
+          </label>
+        </div>
+      </div>
+      <div>
+        <label>Número</label>
+        <input type="text" name="search_value" placeholder="Ejemplo: 16356" value="{{ last_search_value or '' }}">
+        <div class="muted" style="margin-top:6px;">La opción <b>Trámite</b> busca directamente por el valor de `DIG_TRAMITE`.</div>
+      </div>
       <div><label>Oracle destino</label><input type="text" value="{{ defaults.ORACLE_TARGETS }}" readonly></div>
       <div><label>SFTP destino</label><input type="text" value="{{ defaults.SFTP_HOST }}:{{ defaults.SFTP_PORT }} | {{ defaults.SFTP_REMOTE_BASE }}" readonly></div>
     </div>
@@ -24,7 +41,7 @@
 <div class="card">
   <h2>Trabajo activo</h2>
   <p><b>Job:</b> {{ active_job.job_id_value }}</p>
-  <p><b>Trámite:</b> {{ active_job.dig_id_tramite }}</p>
+  <p><b>Búsqueda:</b> {% if active_job.search_mode == 'dig_tramite' %}DIG_TRAMITE{% else %}DIG_ID_TRAMITE{% endif %} = {{ active_job.search_value or active_job.dig_id_tramite }}</p>
   <p><b>Estado:</b> {{ active_job.status }}</p>
   <p><b>Duración:</b> {{ duration_text(active_job) }}</p>
   <p><b>Mensaje:</b> {{ active_job.last_message or '-' }}</p>
@@ -35,12 +52,12 @@
 <div class="card">
   <h2>Cola de trabajos</h2>
   <table>
-    <thead><tr><th>Job</th><th>Trámite</th><th>Estado</th><th>Duración</th><th>Mensaje</th></tr></thead>
+    <thead><tr><th>Job</th><th>Búsqueda</th><th>Estado</th><th>Duración</th><th>Mensaje</th></tr></thead>
     <tbody>
       {% for job in jobs[:10] %}
       <tr>
         <td><a href="/jobs/{{ job.job_id_value }}">{{ job.job_id_value }}</a></td>
-        <td>{{ job.dig_id_tramite }}</td>
+        <td>{% if job.search_mode == 'dig_tramite' %}DIG_TRAMITE{% else %}DIG_ID_TRAMITE{% endif %} = {{ job.search_value or job.dig_id_tramite }}</td>
         <td>{{ job.status }}</td>
         <td>{{ duration_text(job) }}</td>
         <td>{{ job.last_message or '-' }}</td>
@@ -54,7 +71,12 @@
 <div class="card">
   <h2>Previsualización</h2>
   <p><b>Carpetas encontradas:</b> {{ preview["count"] }}</p>
-  <form method="post" action="/start"><input type="hidden" name="dig_id_tramite" value="{{ preview["dig_id_tramite"] }}"><button type="submit">Iniciar descarga</button></form>
+  <p><b>Búsqueda:</b> {% if preview["search_mode"] == 'dig_tramite' %}DIG_TRAMITE{% else %}DIG_ID_TRAMITE{% endif %} = {{ preview["search_value"] }}</p>
+  <form method="post" action="/start">
+    <input type="hidden" name="search_mode" value="{{ preview['search_mode'] }}">
+    <input type="hidden" name="search_value" value="{{ preview['search_value'] }}">
+    <button type="submit">Iniciar descarga</button>
+  </form>
   <table>
     <thead><tr><th>DIG_TRAMITE</th><th>AÑO</th><th>EXPEDIENTE</th><th>AREA</th><th>RUTA</th></tr></thead>
     <tbody>{% for row in preview["items"] %}<tr><td>{{ row.dig_tramite }}</td><td>{{ row.dig_anio }}</td><td>{{ row.dig_expediente }}</td><td>{{ row.dig_area_dep }}</td><td><code>{{ row.remote_rel_path }}</code></td></tr>{% endfor %}</tbody>

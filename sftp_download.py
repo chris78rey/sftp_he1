@@ -11,7 +11,7 @@ from pathlib import Path
 import paramiko
 
 from config import Settings
-from oracle_client import FolderItem, fetch_items_by_dig_id_tramite
+from oracle_client import FolderItem, fetch_items_by_dig_id_tramite, fetch_items_by_dig_tramite
 
 
 def _safe_name(value: object) -> str:
@@ -190,20 +190,29 @@ def sftp_diagnostics() -> dict:
     return result
 
 
-def run_download(dig_id_tramite: int, *, progress_cb=None, log_cb=None) -> dict:
-    items = fetch_items_by_dig_id_tramite(dig_id_tramite)
+def run_download(search_mode: str, raw_value: str | int, *, progress_cb=None, log_cb=None) -> dict:
+    mode = (search_mode or "dig_id_tramite").strip()
+    value = str(raw_value).strip()
+    if mode == "dig_tramite":
+        items = fetch_items_by_dig_tramite(value)
+        search_label = "DIG_TRAMITE"
+    else:
+        mode = "dig_id_tramite"
+        items = fetch_items_by_dig_id_tramite(int(value))
+        search_label = "DIG_ID_TRAMITE"
     if not items:
-        raise RuntimeError(f"No existen filas Oracle para DIG_ID_TRAMITE={dig_id_tramite}")
+        raise RuntimeError(f"No existen filas Oracle para {search_label}={value}")
 
     out_root = Settings.DOWNLOAD_OUTPUT_ROOT
     out_root.mkdir(parents=True, exist_ok=True)
 
     stamp = time.strftime("%Y%m%d_%H%M%S")
-    job_root = (out_root / f"tramite_{dig_id_tramite}_{stamp}").resolve()
-    data_root = (job_root / str(dig_id_tramite)).resolve()
-    zip_path = (out_root / f"tramite_{dig_id_tramite}_{stamp}.zip").resolve()
+    safe_value = _safe_name(value)
+    job_root = (out_root / f"{mode}_{safe_value}_{stamp}").resolve()
+    zip_path = (out_root / f"{mode}_{safe_value}_{stamp}.zip").resolve()
     manifest_path = (job_root / "manifest.json").resolve()
 
+    data_root = (job_root / safe_value).resolve() if mode == "dig_id_tramite" else job_root.resolve()
     data_root.mkdir(parents=True, exist_ok=True)
     sftp = None
     try:
@@ -229,12 +238,12 @@ def run_download(dig_id_tramite: int, *, progress_cb=None, log_cb=None) -> dict:
         counters = {"files_done": 0, "files_total": files_total, "bytes_done": 0, "bytes_total": bytes_total}
         downloaded = []
         for item, remote_dir, _fc, _bc in planned:
-            local_dir = data_root / _safe_name(item.dig_tramite)
+            local_dir = data_root if mode == "dig_tramite" else data_root / _safe_name(item.dig_tramite)
             if log_cb:
                 log_cb(f"Descargando {item.dig_tramite} desde {remote_dir}")
             f_count, b_count = _download_recursive(sftp, remote_dir, local_dir, progress_cb=progress_cb, counters=counters, current_folder=item.dig_tramite)
             downloaded.append({"dig_tramite": item.dig_tramite, "dig_anio": item.dig_anio, "dig_expediente": item.dig_expediente, "fe_pla_aniomes": item.fe_pla_aniomes, "dig_area_dep": item.dig_area_dep, "remote_dir": remote_dir, "local_dir": str(local_dir), "files": f_count, "bytes": b_count})
-        payload = {"dig_id_tramite": int(dig_id_tramite), "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"), "remote_base_requested": Settings.SFTP_REMOTE_BASE, "remote_base_detected": detected_base, "remote_base_probes": probes, "total_files": files_total, "total_bytes": bytes_total, "downloaded": downloaded, "missing": missing, "job_root": str(job_root), "data_root": str(data_root)}
+        payload = {"search_mode": mode, "search_value": value, "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"), "remote_base_requested": Settings.SFTP_REMOTE_BASE, "remote_base_detected": detected_base, "remote_base_probes": probes, "total_files": files_total, "total_bytes": bytes_total, "downloaded": downloaded, "missing": missing, "job_root": str(job_root), "data_root": str(data_root)}
         job_root.mkdir(parents=True, exist_ok=True)
         manifest_path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
         _zip_dir(data_root, zip_path)

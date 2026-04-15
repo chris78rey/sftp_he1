@@ -113,7 +113,7 @@ def connect_with_failover():
     raise RuntimeError(f"No se pudo conectar a Oracle. Último error: {last_exc}")
 
 
-def fetch_items_by_dig_id_tramite(dig_id_tramite: int) -> list[FolderItem]:
+def _fetch_items(where_clause: str, params: list[object]) -> list[FolderItem]:
     conn = connect_with_failover()
     try:
         cur = conn.cursor()
@@ -126,13 +126,13 @@ def fetch_items_by_dig_id_tramite(dig_id_tramite: int) -> list[FolderItem]:
                    TRIM(NVL(FE_PLA_ANIOMES, '')) AS FE_PLA_ANIOMES,
                    TRIM(NVL(DIG_AREA_DEP, '')) AS DIG_AREA_DEP
               FROM {Settings.ORACLE_OWNER}.{Settings.ORACLE_TABLE}
-             WHERE DIG_ID_TRAMITE = ?
+             WHERE {where_clause}
                AND DIG_TRAMITE IS NOT NULL
                AND (TRIM(DIG_ANIO) IS NOT NULL AND LENGTH(TRIM(DIG_ANIO)) > 0)
                AND (TRIM(DIG_EXPEDIENTE) IS NOT NULL AND LENGTH(TRIM(DIG_EXPEDIENTE)) > 0)
              ORDER BY DIG_ANIO, DIG_EXPEDIENTE, DIG_TRAMITE
         """
-        cur.execute(sql, [int(dig_id_tramite)])
+        cur.execute(sql, params)
         rows = cur.fetchall()
         out: list[FolderItem] = []
         for row in rows:
@@ -158,6 +158,23 @@ def fetch_items_by_dig_id_tramite(dig_id_tramite: int) -> list[FolderItem]:
             pass
 
 
-def build_preview(dig_id_tramite: int) -> dict:
-    items = fetch_items_by_dig_id_tramite(dig_id_tramite)
-    return {"dig_id_tramite": int(dig_id_tramite), "count": len(items), "items": [x.to_dict() for x in items]}
+def fetch_items_by_dig_id_tramite(dig_id_tramite: int) -> list[FolderItem]:
+    return _fetch_items("DIG_ID_TRAMITE = ?", [int(dig_id_tramite)])
+
+
+def fetch_items_by_dig_tramite(dig_tramite: str) -> list[FolderItem]:
+    value = str(dig_tramite).strip()
+    if not value:
+        return []
+    return _fetch_items("TRIM(DIG_TRAMITE) = ?", [value])
+
+
+def build_preview(search_mode: str, raw_value: str | int) -> dict:
+    mode = (search_mode or "dig_id_tramite").strip()
+    value = str(raw_value).strip()
+    if mode == "dig_tramite":
+        items = fetch_items_by_dig_tramite(value)
+    else:
+        mode = "dig_id_tramite"
+        items = fetch_items_by_dig_id_tramite(int(value))
+    return {"search_mode": mode, "search_value": value, "count": len(items), "items": [x.to_dict() for x in items]}
