@@ -1,30 +1,91 @@
 {% extends "base.html" %}
-{% set auto_refresh = job.status in ['queued', 'running'] %}
+{% set auto_refresh = job.status in ['queued', 'waiting', 'running'] %}
 {% block content %}
 <h1>Estado de descarga</h1>
+
 <div class="card">
   <p><b>Job:</b> {{ job.job_id_value }}</p>
   <p><b>Búsqueda:</b> {% if job.search_mode == 'dig_tramite' %}DIG_TRAMITE{% else %}DIG_ID_TRAMITE{% endif %} = {{ job.search_value or job.dig_id_tramite }}</p>
   <p><b>Estado:</b> {{ job.status }}</p>
   <p><b>Duración:</b> {{ duration_text(job) }}</p>
   <p><b>Último mensaje:</b> {{ job.last_message or '-' }}</p>
-  {% if job.status in ['queued', 'running'] %}
+
+  {% if job.status in ['queued', 'waiting', 'running'] %}
     <p class="muted">La página se refresca automáticamente cada 4 segundos.</p>
     <div class="progress"><div style="width: {{ progress_pct }}%;">{{ progress_pct }}%</div></div>
   {% endif %}
+
   {% if job.status == 'finished' and job.report %}
+    {% set missing_count = job.report.missing_folders or 0 %}
+    {% set expected_count = job.report.expected_folders or 0 %}
+    {% set found_count = job.report.found_folders or 0 %}
+
+    {% if missing_count > 0 %}
+      <div style="margin:16px 0; padding:14px 16px; border-radius:10px; border:1px solid #f59e0b; background:#fff7ed; color:#9a3412;">
+        <div style="font-weight:bold; margin-bottom:6px;">Advertencia de cuadre</div>
+        <div>
+          Oracle esperaba <b>{{ expected_count }}</b> carpetas, pero en SFTP solo se encontraron
+          <b>{{ found_count }}</b>. Existen <b>{{ missing_count }}</b> carpeta(s) faltante(s).
+        </div>
+        <div style="margin-top:6px;">
+          Se recomienda descargar el <b>CSV de faltantes</b> para identificar exactamente cuáles no estuvieron en el repositorio SFTP.
+        </div>
+      </div>
+    {% else %}
+      <div style="margin:16px 0; padding:14px 16px; border-radius:10px; border:1px solid #86efac; background:#f0fdf4; color:#166534;">
+        <div style="font-weight:bold; margin-bottom:6px;">Cuadre correcto</div>
+        <div>
+          Oracle esperaba <b>{{ expected_count }}</b> carpetas y en SFTP se encontraron las mismas
+          <b>{{ found_count }}</b>.
+        </div>
+      </div>
+    {% endif %}
+
+    <hr style="margin:18px 0; border:none; border-top:1px solid #e5e7eb;">
+
     <p><b>Base remota detectada:</b> <code>{{ job.report.remote_base_detected }}</code></p>
-    <p><b>Total archivos:</b> {{ job.report.total_files }}</p>
-    <p><b>Total bytes:</b> {{ job.report.total_bytes | human_bytes }}</p>
+    <p><b>Carpetas esperadas según Oracle:</b> {{ job.report.expected_folders or 0 }}</p>
+    <p><b>Carpetas encontradas en SFTP:</b> {{ job.report.found_folders or 0 }}</p>
+    <p><b>Carpetas faltantes en SFTP:</b> {{ job.report.missing_folders or 0 }}</p>
+
+    {% if job.report.folder_quadrature_enabled %}
+      <p><b>Carpetas representadas dentro del ZIP:</b> {{ job.report.represented_folders_in_zip or 0 }}</p>
+      <p><b>Directorios vacíos creados para cuadrar:</b> {{ job.report.placeholder_dirs_created or 0 }}</p>
+    {% else %}
+      <p class="muted">El cuadre de carpetas dentro del ZIP está habilitado para búsquedas por ID de trámite.</p>
+    {% endif %}
+
+    <p><b>Total archivos reales descargados:</b> {{ job.report.total_files }}</p>
+    <p><b>Total bytes reales descargados:</b> {{ job.report.total_bytes | human_bytes }}</p>
+
     <p><b>ZIP:</b> <code id="zipPath">{{ job.report.zip_path }}</code></p>
-    <p>
+    <p><b>CSV auditoría:</b> <code id="auditCsvPath">{{ job.report.audit_csv_path }}</code></p>
+    <p><b>CSV faltantes:</b> <code id="missingCsvPath">{{ job.report.missing_csv_path }}</code></p>
+
+    <div class="actions" style="flex-wrap:wrap;">
       <a class="btn" href="/jobs/{{ job.job_id_value }}/download">Descargar ZIP</a>
+      <a class="btn secondary" href="/jobs/{{ job.job_id_value }}/download-audit">Descargar CSV auditoría</a>
+      <a class="btn secondary" href="/jobs/{{ job.job_id_value }}/download-missing">Descargar CSV faltantes</a>
+
       <a class="btn secondary" href="#" onclick="navigator.clipboard.writeText(document.getElementById('zipPath').innerText);return false;">Copiar ruta ZIP</a>
+      <a class="btn secondary" href="#" onclick="navigator.clipboard.writeText(document.getElementById('auditCsvPath').innerText);return false;">Copiar ruta CSV auditoría</a>
+      <a class="btn secondary" href="#" onclick="navigator.clipboard.writeText(document.getElementById('missingCsvPath').innerText);return false;">Copiar ruta CSV faltantes</a>
+
       <a class="btn secondary" href="/">Volver</a>
-    </p>
+    </div>
   {% endif %}
-  {% if job.status == 'failed' %}<pre>{{ job.traceback or job.error }}</pre>{% endif %}
-  {% if job.log_lines %}<h3>Bitácora</h3><details open><summary>Mostrar/Ocultar</summary><pre>{% for line in job.log_lines %}{{ line }}
-{% endfor %}</pre></details>{% endif %}
+
+  {% if job.status == 'failed' %}
+    <pre>{{ job.traceback or job.error }}</pre>
+  {% endif %}
+
+  {% if job.log_lines %}
+    <h3>Bitácora</h3>
+    <details open>
+      <summary>Mostrar/Ocultar</summary>
+      <pre>{% for line in job.log_lines %}{{ line }}
+{% endfor %}</pre>
+    </details>
+  {% endif %}
 </div>
 {% endblock %}

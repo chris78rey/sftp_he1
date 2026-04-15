@@ -52,15 +52,46 @@
 <div class="card">
   <h2>Cola de trabajos</h2>
   <table>
-    <thead><tr><th>Job</th><th>Búsqueda</th><th>Estado</th><th>Duración</th><th>Mensaje</th></tr></thead>
+    <thead>
+      <tr>
+        <th>Job</th>
+        <th>Búsqueda</th>
+        <th>Estado</th>
+        <th>Duración</th>
+        <th>Mensaje</th>
+        <th>Cuadre</th>
+      </tr>
+    </thead>
     <tbody>
       {% for job in jobs[:10] %}
+      {% set missing_count = (job.report.missing_folders if job.report else 0) or 0 %}
+      {% set expected_count = (job.report.expected_folders if job.report else 0) or 0 %}
+      {% set found_count = (job.report.found_folders if job.report else 0) or 0 %}
       <tr>
         <td><a href="/jobs/{{ job.job_id_value }}">{{ job.job_id_value }}</a></td>
         <td>{% if job.search_mode == 'dig_tramite' %}DIG_TRAMITE{% else %}DIG_ID_TRAMITE{% endif %} = {{ job.search_value or job.dig_id_tramite }}</td>
         <td>{{ job.status }}</td>
         <td>{{ duration_text(job) }}</td>
         <td>{{ job.last_message or '-' }}</td>
+        <td>
+          {% if job.status == 'finished' and job.report %}
+            {% if missing_count > 0 %}
+              <div style="padding:8px 10px; border-radius:8px; border:1px solid #f59e0b; background:#fff7ed; color:#9a3412; font-size:12px; line-height:1.4;">
+                <b>Advertencia</b><br>
+                Oracle: {{ expected_count }}<br>
+                SFTP: {{ found_count }}<br>
+                Faltan: {{ missing_count }}
+              </div>
+            {% else %}
+              <div style="padding:8px 10px; border-radius:8px; border:1px solid #86efac; background:#f0fdf4; color:#166534; font-size:12px;">
+                <b>OK</b><br>
+                Cuadra {{ found_count }}/{{ expected_count }}
+              </div>
+            {% endif %}
+          {% else %}
+            <span class="muted">-</span>
+          {% endif %}
+        </td>
       </tr>
       {% endfor %}
     </tbody>

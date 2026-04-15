@@ -5,7 +5,17 @@ import os
 from datetime import datetime, timezone
 from pathlib import Path
 
-from flask import Flask, abort, flash, redirect, render_template, request, send_file, session, url_for
+from flask import (
+    Flask,
+    abort,
+    flash,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    session,
+    url_for,
+)
 
 from config import Settings
 from jobs import create_job, get_job, run_job_async
@@ -74,6 +84,20 @@ def _extract_search(form) -> tuple[str, str]:
     return mode, value
 
 
+def _job_report_file(job_id: str, report_key: str) -> Path:
+    job = get_job(job_id)
+    if job is None:
+        abort(404)
+
+    report = job.get("report") or {}
+    file_path = Path(str(report.get(report_key) or "")).expanduser().resolve()
+
+    if not file_path.exists() or not file_path.is_file():
+        abort(404)
+
+    return file_path
+
+
 @app.get("/healthz")
 def healthz():
     return {"ok": True}, 200
@@ -102,13 +126,26 @@ def logout():
 @login_required
 def home():
     jobs = []
-    from jobs import JOBS, JOB_LOCK
+    from jobs import JOB_LOCK, JOBS
+
     with JOB_LOCK:
         for job in JOBS.values():
             jobs.append(dict(job))
+
     jobs.sort(key=lambda j: j.get("created_at") or "", reverse=True)
     active = next((j for j in jobs if j.get("status") in {"waiting", "running"}), None)
-    return render_template("index.html", defaults=Settings, diagnostics={}, last_search_mode="dig_id_tramite", last_search_value="", username=session.get("username"), jobs=jobs, active_job=active, duration_text=_duration_text)
+
+    return render_template(
+        "index.html",
+        defaults=Settings,
+        diagnostics={},
+        last_search_mode="dig_id_tramite",
+        last_search_value="",
+        username=session.get("username"),
+        jobs=jobs,
+        active_job=active,
+        duration_text=_duration_text,
+    )
 
 
 @app.get("/admin")
@@ -118,6 +155,7 @@ def admin():
     pdfs = []
     zips = []
     total_size = 0
+
     for path in root.rglob("*"):
         if path.is_file():
             try:
@@ -128,7 +166,9 @@ def admin():
                 pdfs.append(path)
             elif path.suffix.lower() == ".zip":
                 zips.append(path)
+
     total_bytes = sum(p.stat().st_size for p in pdfs if p.exists())
+
     return render_template(
         "admin.html",
         defaults=Settings,
@@ -147,6 +187,7 @@ def cleanup_pdfs():
     root = Settings.DOWNLOAD_OUTPUT_ROOT
     removed = 0
     bytes_freed = 0
+
     for path in root.rglob("*"):
         if path.is_file() and path.suffix.lower() == ".pdf":
             try:
@@ -155,6 +196,7 @@ def cleanup_pdfs():
                 removed += 1
             except FileNotFoundError:
                 pass
+
     for dirpath, dirnames, filenames in os.walk(root, topdown=False):
         current = Path(dirpath)
         try:
@@ -162,7 +204,11 @@ def cleanup_pdfs():
                 current.rmdir()
         except Exception:
             pass
-    flash(f"Se eliminaron {removed} PDF(s) y se liberaron {human_bytes(bytes_freed)}.", "ok")
+
+    flash(
+        f"Se eliminaron {removed} PDF(s) y se liberaron {human_bytes(bytes_freed)}.",
+        "ok",
+    )
     return redirect(url_for("admin"))
 
 
@@ -172,6 +218,7 @@ def cleanup_output():
     root = Settings.DOWNLOAD_OUTPUT_ROOT
     removed_files = 0
     freed = 0
+
     if root.exists():
         for path in sorted(root.rglob("*"), reverse=True):
             if path.is_file():
@@ -186,7 +233,11 @@ def cleanup_output():
                     path.rmdir()
                 except OSError:
                     pass
-    flash(f"Se eliminó todo el contenido de output: {removed_files} archivo(s), {human_bytes(freed)} liberados.", "ok")
+
+    flash(
+        f"Se eliminó todo el contenido de output: {removed_files} archivo(s), {human_bytes(freed)} liberados.",
+        "ok",
+    )
     return redirect(url_for("admin"))
 
 
@@ -203,35 +254,80 @@ def diagnostics():
 @login_required
 def preview():
     search_mode, raw = _extract_search(request.form)
+
     if not raw.isdigit():
         flash(f"{_search_mode_label(search_mode)} debe ser numérico.", "error")
-        return render_template("index.html", defaults=Settings, last_search_mode=search_mode, last_search_value=raw)
+        return render_template(
+            "index.html",
+            defaults=Settings,
+            last_search_mode=search_mode,
+            last_search_value=raw,
+        )
+
     try:
         preview_data = build_preview(search_mode, raw)
         if int(preview_data.get("count") or 0) == 0:
-            flash(f"No se encontraron carpetas para ese {_search_mode_label(preview_data.get('search_mode'))}.", "error")
-        return render_template("index.html", defaults=Settings, preview=preview_data, last_search_mode=preview_data.get("search_mode"), last_search_value=raw)
+            flash(
+                f"No se encontraron carpetas para ese {_search_mode_label(preview_data.get('search_mode'))}.",
+                "error",
+            )
+        return render_template(
+            "index.html",
+            defaults=Settings,
+            preview=preview_data,
+            last_search_mode=preview_data.get("search_mode"),
+            last_search_value=raw,
+        )
     except Exception as exc:
         flash(f"Error consultando Oracle: {exc}", "error")
-        return render_template("index.html", defaults=Settings, last_search_mode=search_mode, last_search_value=raw)
+        return render_template(
+            "index.html",
+            defaults=Settings,
+            last_search_mode=search_mode,
+            last_search_value=raw,
+        )
 
 
 @app.post("/start")
 @login_required
 def start():
     search_mode, raw = _extract_search(request.form)
+
     if not raw.isdigit():
         flash(f"{_search_mode_label(search_mode)} debe ser numérico.", "error")
-        return render_template("index.html", defaults=Settings, last_search_mode=search_mode, last_search_value=raw)
+        return render_template(
+            "index.html",
+            defaults=Settings,
+            last_search_mode=search_mode,
+            last_search_value=raw,
+        )
+
     try:
         preview_data = build_preview(search_mode, raw)
         if int(preview_data.get("count") or 0) == 0:
-            flash(f"No se encontraron carpetas para ese {_search_mode_label(preview_data.get('search_mode'))}.", "error")
-            return render_template("index.html", defaults=Settings, preview=preview_data, last_search_mode=preview_data.get("search_mode"), last_search_value=raw)
+            flash(
+                f"No se encontraron carpetas para ese {_search_mode_label(preview_data.get('search_mode'))}.",
+                "error",
+            )
+            return render_template(
+                "index.html",
+                defaults=Settings,
+                preview=preview_data,
+                last_search_mode=preview_data.get("search_mode"),
+                last_search_value=raw,
+            )
     except Exception as exc:
         flash(f"Error consultando Oracle: {exc}", "error")
-        return render_template("index.html", defaults=Settings, last_search_mode=search_mode, last_search_value=raw)
-    job_id = create_job(str(preview_data.get("search_mode") or search_mode), raw, preview_data)
+        return render_template(
+            "index.html",
+            defaults=Settings,
+            last_search_mode=search_mode,
+            last_search_value=raw,
+        )
+
+    job_id = create_job(
+        str(preview_data.get("search_mode") or search_mode), raw, preview_data
+    )
     run_job_async(job_id)
     return redirect(url_for("job_view", job_id=job_id))
 
@@ -242,20 +338,51 @@ def job_view(job_id: str):
     job = get_job(job_id)
     if job is None:
         abort(404)
-    return render_template("job.html", job=job, progress_pct=_progress_pct(job), duration_text=_duration_text)
+    return render_template(
+        "job.html",
+        job=job,
+        progress_pct=_progress_pct(job),
+        duration_text=_duration_text,
+    )
 
 
+# === EXISTENTE: descarga principal ZIP ===
 @app.get("/jobs/<job_id>/download")
 @login_required
 def job_download(job_id: str):
-    job = get_job(job_id)
-    if job is None:
-        abort(404)
-    report = job.get("report") or {}
-    zip_path = Path(str(report.get("zip_path") or "")).expanduser().resolve()
-    if not zip_path.exists() or not zip_path.is_file():
-        abort(404)
-    return send_file(str(zip_path), as_attachment=True, download_name=zip_path.name, mimetype="application/zip")
+    zip_path = _job_report_file(job_id, "zip_path")
+    return send_file(
+        str(zip_path),
+        as_attachment=True,
+        download_name=zip_path.name,
+        mimetype="application/zip",
+    )
+
+
+# === NUEVO: descarga del CSV de auditoría ===
+@app.get("/jobs/<job_id>/download-audit")
+@login_required
+def job_download_audit(job_id: str):
+    csv_path = _job_report_file(job_id, "audit_csv_path")
+    return send_file(
+        str(csv_path),
+        as_attachment=True,
+        download_name=csv_path.name,
+        mimetype="text/csv",
+    )
+
+
+# === NUEVO: descarga del CSV de faltantes ===
+@app.get("/jobs/<job_id>/download-missing")
+@login_required
+def job_download_missing(job_id: str):
+    csv_path = _job_report_file(job_id, "missing_csv_path")
+    return send_file(
+        str(csv_path),
+        as_attachment=True,
+        download_name=csv_path.name,
+        mimetype="text/csv",
+    )
 
 
 @app.template_filter("human_bytes")
@@ -264,9 +391,11 @@ def human_bytes(value: int | float | None) -> str:
         n = float(value or 0)
     except Exception:
         n = 0.0
+
     units = ["B", "KB", "MB", "GB", "TB"]
     i = 0
     while n >= 1024 and i < len(units) - 1:
         n /= 1024.0
         i += 1
+
     return ("%0.1f %s" % (n, units[i])).replace(".0 ", " ")
