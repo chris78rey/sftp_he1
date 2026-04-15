@@ -9,5 +9,6 @@ TARGET_UNIT="$UNIT_DIR/$UNIT_NAME"
 mkdir -p "$UNIT_DIR"
 cp "$DIR/$UNIT_NAME" "$TARGET_UNIT"
 systemctl --user daemon-reload
-systemctl --user enable --now "$UNIT_NAME"
+systemctl --user enable "$UNIT_NAME"
+systemctl --user restart "$UNIT_NAME"
 systemctl --user status --no-pager "$UNIT_NAME"

@@ -14,7 +14,18 @@ fail() {
 [ -f "$JAR_PATH" ] || fail "No existe el driver JDBC en $JAR_PATH"
 [ -d "$DIR/.venv" ] || fail "No existe el entorno virtual en $DIR/.venv"
 
-. "$ENV_FILE"
+eval "$(
+  "$DIR/.venv/bin/python" - "$ENV_FILE" <<'PY'
+import shlex
+import sys
+from dotenv import dotenv_values
+
+for key, value in dotenv_values(sys.argv[1]).items():
+    if value is None:
+        continue
+    print(f"export {key}={shlex.quote(value)}")
+PY
+)"
 
 [ -n "${ORACLE_USER:-}" ] || fail "Falta ORACLE_USER"
 [ -n "${ORACLE_PASSWORD:-}" ] || fail "Falta ORACLE_PASSWORD"

@@ -1,16 +1,20 @@
 [Unit]
 Description=SFTP HE1
-After=network.target
+Wants=network-online.target
+After=network-online.target
 
 [Service]
 Type=simple
-WorkingDirectory=/data_nuevo/flask_sftp/sftp_he1
-EnvironmentFile=/data_nuevo/flask_sftp/sftp_he1/.env
-ExecStart=/data_nuevo/flask_sftp/sftp_he1/.venv/bin/python /data_nuevo/flask_sftp/sftp_he1/run_local.py
-Restart=on-failure
-RestartSec=3
 User=red_gestion
 Group=red_gestion
+WorkingDirectory=/data_nuevo/flask_sftp/sftp_he1
+EnvironmentFile=/data_nuevo/flask_sftp/sftp_he1/.env
+Environment="GUNICORN_CMD_ARGS=--worker-class gthread --workers 1 --threads 4 --bind 0.0.0.0:5085 --timeout 120 --access-logfile - --error-logfile - --capture-output"
+ExecStart=/data_nuevo/flask_sftp/sftp_he1/.venv/bin/gunicorn app:app
+Restart=always
+RestartSec=5
+KillSignal=SIGQUIT
+TimeoutStopSec=30
 
 [Install]
 WantedBy=multi-user.target

@@ -17,5 +17,6 @@ fi
 
 sudo install -m 0644 "$DIR/$UNIT_NAME" "$TARGET_UNIT"
 sudo systemctl daemon-reload
-sudo systemctl enable --now "$UNIT_NAME"
+sudo systemctl enable "$UNIT_NAME"
+sudo systemctl restart "$UNIT_NAME"
 sudo systemctl status --no-pager "$UNIT_NAME"

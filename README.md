@@ -50,13 +50,16 @@ Por defecto escucha en `127.0.0.1:5085`. Puedes cambiarlo con `APP_HOST` y `APP_
 
 ## Como servicio systemd
 
+La unidad usa `gunicorn`, arranca al boot de Ubuntu y se reinicia sola si el proceso cae.
+
 1. Copiar `sftp_he1.service` a `/etc/systemd/system/`.
 2. Ejecutar:
 
 ```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now sftp_he1
+sudo ./install_systemd.sh
 ```
+
+La URL sigue siendo la misma, normalmente `http://127.0.0.1:5085` o la que tenga tu proxy delante.
 
 ## Como servicio de usuario
 
