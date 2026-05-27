@@ -127,6 +127,7 @@ def _fetch_items(where_clause: str, params: list[object]) -> list[FolderItem]:
                    TRIM(NVL(DIG_AREA_DEP, '')) AS DIG_AREA_DEP
               FROM {Settings.ORACLE_OWNER}.{Settings.ORACLE_TABLE}
              WHERE {where_clause}
+               AND DIG_ID_TRAMITE IS NOT NULL
                AND DIG_TRAMITE IS NOT NULL
                AND (TRIM(DIG_ANIO) IS NOT NULL AND LENGTH(TRIM(DIG_ANIO)) > 0)
                AND (TRIM(DIG_EXPEDIENTE) IS NOT NULL AND LENGTH(TRIM(DIG_EXPEDIENTE)) > 0)
@@ -136,12 +137,20 @@ def _fetch_items(where_clause: str, params: list[object]) -> list[FolderItem]:
         rows = cur.fetchall()
         out: list[FolderItem] = []
         for row in rows:
+            if row[0] is None:
+                continue
+
+            try:
+                dig_id_tramite = int(str(row[0]).strip())
+            except Exception:
+                continue
+
             dig_anio = str(row[2]).strip()
             dig_expediente = str(row[3]).strip()
             dig_tramite = str(row[1]).strip()
             out.append(
                 FolderItem(
-                    dig_id_tramite=int(row[0]),
+                    dig_id_tramite=dig_id_tramite,
                     dig_tramite=dig_tramite,
                     dig_anio=dig_anio,
                     dig_expediente=dig_expediente,
@@ -167,6 +176,13 @@ def fetch_items_by_dig_tramite(dig_tramite: str) -> list[FolderItem]:
     if not value:
         return []
     return _fetch_items("TRIM(DIG_TRAMITE) = ?", [value])
+
+
+def fetch_items_by_fe_pla_aniomes(fe_pla_aniomes: str) -> list[FolderItem]:
+    value = str(fe_pla_aniomes).strip()
+    if not value:
+        return []
+    return _fetch_items("TRIM(FE_PLA_ANIOMES) = ?", [value])
 
 
 def build_preview(search_mode: str, raw_value: str | int) -> dict:

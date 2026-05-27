@@ -26,6 +26,9 @@ class Settings:
     SFTP_USER = os.environ.get("SFTP_USER", "").strip()
     SFTP_PASSWORD = os.environ.get("SFTP_PASSWORD", "").strip()
     SFTP_REMOTE_BASE = os.environ.get("SFTP_REMOTE_BASE", "/repositorio").strip()
+    LOCAL_REPO_ROOT = Path(
+        os.environ.get("LOCAL_REPO_ROOT", "/data_nuevo/repo_grande/data/datos")
+    ).expanduser().resolve()
 
     DOWNLOAD_OUTPUT_ROOT = Path(
         os.environ.get("DOWNLOAD_OUTPUT_ROOT", str(BASE_DIR / "output"))

@@ -1,0 +1,159 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Sincronización por ANIOMES</h1>
+<div class="card">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}<p class="{{ 'error' if category == 'error' else '' }}">{{ message }}</p>{% endfor %}
+    {% endif %}
+  {% endwith %}
+  <p class="muted" style="margin-top:0;">
+    Esta pantalla filtra Oracle por <code>FE_PLA_ANIOMES</code> y compara solo las rutas
+    <code>HSP03</code> -> <code>HSP04</code> para el <code>ANIOMES</code> indicado.
+    No toca otros meses ni otros árboles del repositorio.
+  </p>
+  <form method="post" action="/sync-candidates">
+    <input type="hidden" name="action" value="preview">
+    <div class="grid">
+      <div>
+        <label>ANIOMES</label>
+        <input type="text" name="aniomes" placeholder="Ejemplo: 202604" value="{{ last_aniomes or '' }}" maxlength="6">
+        <div class="muted" style="margin-top:6px;">Formato esperado: <code>AAAAMM</code>.</div>
+      </div>
+      <div>
+        <label>Oracle destino</label>
+        <input type="text" value="{{ defaults.ORACLE_OWNER }}.{{ defaults.ORACLE_TABLE }}" readonly>
+      </div>
+      <div>
+        <label>Repositorio local</label>
+        <input type="text" value="{{ defaults.LOCAL_REPO_ROOT }}" readonly>
+      </div>
+    </div>
+    <div class="actions">
+      <button type="submit">Buscar candidatas</button>
+    </div>
+  </form>
+</div>
+
+{% if preview %}
+<div class="card">
+  <h2>Resumen</h2>
+  <div class="grid" style="grid-template-columns:repeat(4, minmax(0,1fr));">
+    <div><label>ANIOMES</label><input type="text" value="{{ preview.aniomes }}" readonly></div>
+    <div><label>Mes objetivo</label><input type="text" value="{{ preview.year }}/{{ preview.target_hsp }}" readonly></div>
+    <div><label>Mes fuente</label><input type="text" value="{{ preview.source_year }}/{{ preview.source_hsp }}" readonly></div>
+    <div><label>Candidatas</label><input type="text" value="{{ preview.summary.candidates }}" readonly></div>
+  </div>
+  <p class="muted" style="margin-top:12px;">
+    Solo se consideran trámites cuyo origen está en <code>{{ preview.source_hsp }}</code> y cuyo destino es
+    <code>{{ preview.target_hsp }}</code>. Si ya existen en destino, no se vuelven a mover.
+  </p>
+  <div class="grid" style="grid-template-columns:repeat(3, minmax(0,1fr)); margin-top:12px;">
+    <div class="card" style="margin:0; background:#f8fafc;">
+      <b>Filas analizadas</b><br>{{ preview.summary.total }}
+    </div>
+    <div class="card" style="margin:0; background:#fefce8;">
+      <b>Ya en destino</b><br>{{ preview.summary.already_in_target }}
+    </div>
+    <div class="card" style="margin:0; background:#fff7ed;">
+      <b>No en origen y destino</b><br>{{ preview.summary.missing_both }}
+    </div>
+  </div>
+  <div class="actions" style="margin-top:14px;">
+    <form method="post" action="/sync-candidates" style="display:inline;">
+      <input type="hidden" name="aniomes" value="{{ preview.aniomes }}">
+      <input type="hidden" name="action" value="dry_run">
+      <button type="submit">Simular rsync</button>
+    </form>
+    {% if can_execute %}
+    <form method="post" action="/sync-candidates" style="display:inline;">
+      <input type="hidden" name="aniomes" value="{{ preview.aniomes }}">
+      <input type="hidden" name="action" value="execute">
+      <button type="submit" class="secondary">Ejecutar sincronización</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+{% if preview.sync_run %}
+<div class="card">
+  <h2>Resultado de {{ "dry run" if preview.sync_run.mode == "dry_run" else "ejecución" }}</h2>
+  <p><b>Carpetas procesadas:</b> {{ preview.sync_run.total }}</p>
+  <p><b>Correctas:</b> {{ preview.sync_run.succeeded }} | <b>Con error:</b> {{ preview.sync_run.failed }}</p>
+  {% for row in preview.sync_run.results %}
+  <div class="card" style="margin:12px 0 0; background:{% if row.ok %}#f0fdf4{% else %}#fef2f2{% endif %}; border-color:{% if row.ok %}#86efac{% else %}#fca5a5{% endif %};">
+    <p style="margin-top:0;"><b>{{ row.dig_tramite }}</b> <span class="muted">({{ row.dig_id_tramite }})</span></p>
+    <p><b>Origen:</b> <code>{{ row.source_path }}</code></p>
+    <p><b>Destino:</b> <code>{{ row.target_path }}</code></p>
+    <p><b>Estado:</b> {% if row.ok %}OK{% else %}ERROR{% endif %} | <b>Código:</b> {{ row.returncode }}</p>
+    {% if row.reason %}
+    <p class="error"><b>Motivo:</b> {{ row.reason }}</p>
+    {% endif %}
+    {% if row.command %}
+    <details>
+      <summary>Comando</summary>
+      <pre>{{ row.command }}</pre>
+    </details>
+    {% endif %}
+    {% if row.stdout %}
+    <details>
+      <summary>Salida estándar</summary>
+      <pre>{{ row.stdout }}</pre>
+    </details>
+    {% endif %}
+    {% if row.stderr %}
+    <details>
+      <summary>Error</summary>
+      <pre>{{ row.stderr }}</pre>
+    </details>
+    {% endif %}
+    {% if row.truncated %}
+    <p class="muted">La salida fue truncada por tamaño.</p>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Detalle</h2>
+  {% if preview.rows %}
+  <table>
+    <thead>
+      <tr>
+        <th>Trámite</th>
+        <th>ANIOMES</th>
+        <th>Estado</th>
+        <th>Fuente</th>
+        <th>Destino</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in preview.rows %}
+      <tr style="{% if row.candidate %}background:#fff7ed;{% elif row.target_exists %}background:#f0fdf4;{% endif %}">
+        <td>
+          <b>{{ row.dig_tramite }}</b><br>
+          <span class="muted">{{ row.dig_id_tramite }}</span>
+        </td>
+        <td>{{ row.fe_pla_aniomes }}</td>
+        <td>
+          {% if row.candidate %}
+            <b>CANDIDATA</b><br>Está en {{ preview.source_hsp }} y falta en {{ preview.target_hsp }}
+          {% elif row.target_exists %}
+            <b>YA EN DESTINO</b><br>Existe en {{ preview.target_hsp }}
+          {% else %}
+            <b>NO EN FUENTE</b><br>No aparece en {{ preview.source_hsp }}
+          {% endif %}
+        </td>
+        <td><code>{{ row.source_path }}</code></td>
+        <td><code>{{ row.target_path }}</code></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="muted">No hay filas para mostrar.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

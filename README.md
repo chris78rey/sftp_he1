@@ -81,8 +81,14 @@ loginctl enable-linger red_gestion
 - `ORACLE_JDBC_JAR`: ruta al `ojdbc8.jar`.
 - `ORACLE_TARGETS`: lista `host:puerto:sid` separada por comas.
 - `SFTP_REMOTE_BASE`: base remota del árbol SFTP.
+- `LOCAL_REPO_ROOT`: raíz local del repositorio para la pantalla de sincronización por `ANIOMES`.
 - `DOWNLOAD_OUTPUT_ROOT`: carpeta local donde se guardan los ZIP y manifests.
 - `APP_HOST` y `APP_PORT`: host y puerto del servidor Flask.
+
+## Pantalla de sincronización
+
+En `/sync-candidates` puedes ingresar un `ANIOMES` como `202604` para filtrar Oracle por `FE_PLA_ANIOMES` y comparar el repositorio local entre `HSP03` y `HSP04`.
+Primero haces un dry run desde la web y, si el resultado te cuadra, ejecutas la sincronización desde el mismo panel.
 
 ## Verificación previa a producción
 
