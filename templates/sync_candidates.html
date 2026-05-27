@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>HOSPITALIZACION CASOS</h1>
+<h1>{{ screen_title or "HOSPITALIZACION CASOS" }}</h1>
 <div class="card">
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
@@ -8,9 +8,12 @@
     {% endif %}
   {% endwith %}
   <p class="muted" style="margin-top:0;">
-    Esta pantalla filtra Oracle por <code>FE_PLA_ANIOMES</code> y compara solo las rutas
-    <code>HSP03</code> -> <code>HSP04</code> para el <code>ANIOMES</code> indicado.
+    Esta ventana filtra Oracle por <code>FE_PLA_ANIOMES</code> y compara solo las rutas
+    <code>{{ folder_prefix or "HSP" }}03</code> -> <code>{{ folder_prefix or "HSP" }}04</code> para el <code>ANIOMES</code> indicado.
     No toca otros meses ni otros árboles del repositorio.
+    {% if area_dep_filter %}
+    El filtro adicional de área dep es <code>{{ area_dep_filter }}</code>.
+    {% endif %}
   </p>
   <form method="post" action="/sync-candidates">
     <input type="hidden" name="action" value="preview">
@@ -47,6 +50,9 @@
   <p class="muted" style="margin-top:12px;">
     Solo se consideran trámites cuyo origen está en <code>{{ preview.source_hsp }}</code> y cuyo destino es
     <code>{{ preview.target_hsp }}</code>. Si ya existen en destino, no se vuelven a mover.
+    {% if preview.area_dep_filter %}
+    En esta ventana además se filtra por <code>{{ preview.area_dep_filter }}</code>.
+    {% endif %}
   </p>
   <div class="grid" style="grid-template-columns:repeat(3, minmax(0,1fr)); margin-top:12px;">
     <div class="card" style="margin:0; background:#f8fafc;">

@@ -185,6 +185,19 @@ def fetch_items_by_fe_pla_aniomes(fe_pla_aniomes: str) -> list[FolderItem]:
     return _fetch_items("TRIM(FE_PLA_ANIOMES) = ?", [value])
 
 
+def fetch_items_by_fe_pla_aniomes_and_area_dep(
+    fe_pla_aniomes: str, area_dep: str
+) -> list[FolderItem]:
+    aniomes = str(fe_pla_aniomes).strip()
+    area = str(area_dep).strip()
+    if not aniomes or not area:
+        return []
+    return _fetch_items(
+        "TRIM(FE_PLA_ANIOMES) = ? AND TRIM(DIG_AREA_DEP) = ?",
+        [aniomes, area],
+    )
+
+
 def build_preview(search_mode: str, raw_value: str | int) -> dict:
     mode = (search_mode or "dig_id_tramite").strip()
     value = str(raw_value).strip()

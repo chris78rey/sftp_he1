@@ -1,0 +1,192 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ screen_title or "VALIDACION DE RUTAS" }}</h1>
+<div class="card">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for category, message in messages %}<p class="{{ 'error' if category == 'error' else '' }}">{{ message }}</p>{% endfor %}
+    {% endif %}
+  {% endwith %}
+  <p class="muted" style="margin-top:0;">
+    Esta ventana toma Oracle con <code>FE_PLA_ANIOMES</code>, arma el path esperado con los campos de la tabla y
+    muestra solo las filas que no coinciden con el repositorio. La ruta esperada se arma con
+    <code>DIG_ANIO</code>, <code>DIG_EXPEDIENTE</code> y <code>DIG_TRAMITE</code> tal como sale en Oracle.
+  </p>
+  <form method="post" action="/path-validation">
+    <input type="hidden" name="action" value="dry_run">
+    <div class="grid">
+      <div>
+        <label>ANIOMES</label>
+        <input type="text" name="aniomes" placeholder="Ejemplo: 202604" value="{{ last_aniomes or '' }}" maxlength="6">
+        <div class="muted" style="margin-top:6px;">Formato esperado: <code>AAAAMM</code>.</div>
+      </div>
+      <div>
+        <label>Oracle destino</label>
+        <input type="text" value="{{ defaults.ORACLE_OWNER }}.{{ defaults.ORACLE_TABLE }}" readonly>
+      </div>
+      <div>
+        <label>Repositorio local</label>
+        <input type="text" value="{{ defaults.LOCAL_REPO_ROOT }}" readonly>
+      </div>
+    </div>
+    <div class="actions">
+      <button type="submit">Iniciar revisión</button>
+    </div>
+  </form>
+</div>
+
+{% if active_job %}
+<div class="card">
+  <h2>Revisión en curso</h2>
+  <p><b>Job:</b> {{ active_job.job_id_value }}</p>
+  <p><b>Estado:</b> {{ active_job.status }}</p>
+  <p><b>Duración:</b> {{ duration_text(active_job) }}</p>
+  <p><b>Mensaje:</b> {{ active_job.last_message or '-' }}</p>
+  <p class="muted">La página se refresca automáticamente mientras termina la revisión.</p>
+  <div class="progress"><div style="width: {{ progress_pct }}%;">{{ progress_pct }}%</div></div>
+  <div class="actions">
+    <a class="btn secondary" href="/jobs/{{ active_job.job_id_value }}/download-validation-csv">Descargar CSV parcial</a>
+  </div>
+</div>
+{% endif %}
+
+{% if preview %}
+<div class="card">
+  <h2>Resumen</h2>
+  <div class="grid" style="grid-template-columns:repeat(6, minmax(0,1fr));">
+    <div><label>ANIOMES</label><input type="text" value="{{ preview.aniomes }}" readonly></div>
+    <div><label>Total Oracle</label><input type="text" value="{{ preview.summary.total }}" readonly></div>
+    <div><label>Coinciden</label><input type="text" value="{{ preview.summary.matched }}" readonly></div>
+    <div><label>Discrepancias</label><input type="text" value="{{ preview.summary.discrepancies }}" readonly></div>
+    <div><label>Movibles</label><input type="text" value="{{ preview.summary.movable }}" readonly></div>
+    <div><label>No movibles</label><input type="text" value="{{ preview.summary.missing }}" readonly></div>
+  </div>
+  <div class="grid" style="grid-template-columns:repeat(3, minmax(0,1fr)); margin-top:12px;">
+    <div class="card" style="margin:0; background:#f0fdf4;">
+      <b>Coincidencia</b><br>{{ preview.summary.match_pct }}%
+    </div>
+    <div class="card" style="margin:0; background:#fff7ed;">
+      <b>Discrepancia</b><br>{{ preview.summary.discrepancy_pct }}%
+    </div>
+    <div class="card" style="margin:0; background:#eff6ff;">
+      <b>Movibles</b><br>{{ preview.summary.movable_pct }}%
+    </div>
+  </div>
+  <div style="margin-top:14px;">
+    <label>Progreso de revisión</label>
+    <div class="progress" style="height:24px; display:flex; overflow:hidden;">
+      <div style="width: {{ preview.summary.match_pct }}%; background:#16a34a;">{{ preview.summary.match_pct }}%</div>
+      <div style="width: {{ preview.summary.movable_pct }}%; background:#2563eb;">{{ preview.summary.movable_pct }}%</div>
+      <div style="width: {{ preview.summary.nonmovable_pct }}%; background:#f59e0b;">{{ preview.summary.nonmovable_pct }}%</div>
+    </div>
+    <div class="muted" style="margin-top:6px;">
+      Verde = coincide, azul = movible, ámbar = discrepancia no movible.
+    </div>
+  </div>
+  <p class="muted" style="margin-top:12px;">
+    Solo se listan registros que no coinciden. Los movibles son los que tienen una ruta origen encontrada y una ruta destino esperada.
+  </p>
+  <div class="actions" style="margin-top:14px;">
+    <form method="post" action="/path-validation" style="display:inline;">
+      <input type="hidden" name="aniomes" value="{{ preview.aniomes }}">
+      <input type="hidden" name="action" value="dry_run">
+      <button type="submit">Simular rsync</button>
+    </form>
+    {% if active_job %}
+    <a class="btn secondary" href="/jobs/{{ active_job.job_id_value }}/download-validation-csv">Descargar CSV parcial</a>
+    {% endif %}
+    {% if can_execute %}
+    <form method="post" action="/path-validation" style="display:inline;">
+      <input type="hidden" name="aniomes" value="{{ preview.aniomes }}">
+      <input type="hidden" name="action" value="execute">
+      <button type="submit" class="secondary">Ejecutar sincronización</button>
+    </form>
+    {% endif %}
+  </div>
+</div>
+
+{% if preview.sync_run %}
+<div class="card">
+  <h2>Resultado de {{ "dry run" if preview.sync_run.mode == "dry_run" else "ejecución" }}</h2>
+  <p><b>Rutas procesadas:</b> {{ preview.sync_run.total }}</p>
+  <p><b>Correctas:</b> {{ preview.sync_run.succeeded }} | <b>Con error:</b> {{ preview.sync_run.failed }}</p>
+  {% for row in preview.sync_run.results %}
+  <div class="card" style="margin:12px 0 0; background:{% if row.ok %}#f0fdf4{% else %}#fef2f2{% endif %}; border-color:{% if row.ok %}#86efac{% else %}#fca5a5{% endif %};">
+    <p style="margin-top:0;"><b>{{ row.dig_tramite }}</b> <span class="muted">({{ row.dig_id_tramite }})</span></p>
+    <p><b>Origen:</b> <code>{{ row.source_path }}</code></p>
+    <p><b>Destino:</b> <code>{{ row.target_path }}</code></p>
+    <p><b>Estado:</b> {% if row.ok %}OK{% else %}ERROR{% endif %} | <b>Código:</b> {{ row.returncode }}</p>
+    {% if row.reason %}
+    <p class="error"><b>Motivo:</b> {{ row.reason }}</p>
+    {% endif %}
+    {% if row.command %}
+    <details>
+      <summary>Comando</summary>
+      <pre>{{ row.command }}</pre>
+    </details>
+    {% endif %}
+    {% if row.stdout %}
+    <details>
+      <summary>Salida estándar</summary>
+      <pre>{{ row.stdout }}</pre>
+    </details>
+    {% endif %}
+    {% if row.stderr %}
+    <details>
+      <summary>Error</summary>
+      <pre>{{ row.stderr }}</pre>
+    </details>
+    {% endif %}
+    {% if row.truncated %}
+    <p class="muted">La salida fue truncada por tamaño.</p>
+    {% endif %}
+  </div>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Discrepancias</h2>
+  {% if preview.rows %}
+  <table>
+    <thead>
+      <tr>
+        <th>Ruta Oracle</th>
+        <th>Ruta real encontrada</th>
+        <th>Estado</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for row in preview.rows %}
+      <tr style="{% if row.movable %}background:#fff7ed;{% else %}background:#fef2f2;{% endif %}">
+        <td>
+          <code>{{ row.expected_path }}</code><br>
+          <span class="muted">Trámite: {{ row.dig_tramite }} | Expediente: {{ row.dig_expediente }}</span>
+        </td>
+        <td>
+          {% if row.found_paths %}
+            {% for path in row.found_paths %}
+              <code>{{ path }}</code>{% if not loop.last %}<br>{% endif %}
+            {% endfor %}
+          {% else %}
+            <span class="muted">No encontrada</span>
+          {% endif %}
+        </td>
+        <td>
+          <b>{{ row.status }}</b><br>
+          {% if row.movable %}
+            Se puede mover con rsync
+          {% else %}
+            No hay carpeta origen para mover
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="muted">No hay discrepancias para mostrar.</p>
+  {% endif %}
+</div>
+{% endif %}
+{% endblock %}

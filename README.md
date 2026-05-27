@@ -90,6 +90,11 @@ loginctl enable-linger red_gestion
 En `/sync-candidates` puedes ingresar un `ANIOMES` como `202604` para filtrar Oracle por `FE_PLA_ANIOMES` y comparar el repositorio local entre `HSP03` y `HSP04`.
 Primero haces un dry run desde la web y, si el resultado te cuadra, ejecutas la sincronización desde el mismo panel.
 
+## Validación de rutas
+
+En `/path-validation` puedes ingresar un `ANIOMES` como `202604` para comparar el `path` esperado desde Oracle contra el `path` real encontrado en el repositorio.
+La pantalla muestra solo las discrepancias, calcula porcentajes y permite hacer dry run antes de mover con `rsync`.
+
 ## Verificación previa a producción
 
 1. Copiar `.env.production.example` a `.env`.

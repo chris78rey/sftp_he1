@@ -2,9 +2,15 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import io
+import csv
 import os
+import re
 import shlex
 import subprocess
+import threading
+import traceback
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -21,9 +27,10 @@ from flask import (
 )
 
 from config import Settings
-from jobs import create_job, get_job, run_job_async
+from jobs import append_log, create_job, get_job, run_job_async, update_job
 from oracle_client import (
     build_preview,
+    fetch_items_by_fe_pla_aniomes_and_area_dep,
     fetch_items_by_fe_pla_aniomes,
     oracle_diagnostics,
 )
@@ -102,8 +109,8 @@ def _validate_aniomes(value: str) -> bool:
     return 1 <= month <= 12
 
 
-def _hsp_from_month(month: int) -> str:
-    return f"HSP{month:02d}"
+def _folder_code(prefix: str, month: int) -> str:
+    return f"{prefix}{month:02d}"
 
 
 def _previous_month(year: int, month: int) -> tuple[int, int]:
@@ -114,6 +121,20 @@ def _previous_month(year: int, month: int) -> tuple[int, int]:
 
 def _folder_name_for_item(item) -> str:
     return str(getattr(item, "dig_tramite", "") or getattr(item, "dig_id_tramite", "")).strip()
+
+
+def _folder_name_variants(folder_name: str) -> list[str]:
+    text = str(folder_name or "").strip()
+    variants = [text]
+    if text.isdigit():
+        trimmed = text.rstrip("0")
+        if trimmed and trimmed not in variants:
+            variants.append(trimmed)
+    return variants
+
+
+def _expected_tramite_name(item) -> str:
+    return _folder_name_for_item(item)
 
 
 def _sync_candidate_rows(preview: dict) -> list[dict]:
@@ -224,13 +245,407 @@ def _run_sync_batch(preview: dict, *, dry_run: bool) -> dict:
     }
 
 
-def _build_aniomes_candidates(aniomes: str) -> dict:
+def _repo_match_paths(year: str, expediente: str, folder_name: str) -> list[Path]:
+    year_root = Settings.LOCAL_REPO_ROOT / str(year)
+    if not year_root.exists():
+        return []
+
+    expediente_root = year_root / str(expediente)
+    candidate = expediente_root / str(folder_name)
+    matches: list[Path] = []
+
+    try:
+        if candidate.is_dir():
+            matches.append(candidate.resolve())
+
+        for found in year_root.rglob(str(folder_name)):
+            if not found.is_dir():
+                continue
+            resolved = found.resolve()
+            if resolved not in matches:
+                matches.append(resolved)
+    except Exception:
+        return matches
+
+    return sorted(matches, key=lambda p: str(p))
+
+
+def _build_path_validation(aniomes: str) -> dict:
     items = fetch_items_by_fe_pla_aniomes(aniomes)
     year = int(aniomes[:4])
     month = int(aniomes[4:])
-    target_hsp = _hsp_from_month(month)
+    month_prefix = f"{month:02d}"
+
+    if not items:
+        return {
+            "aniomes": aniomes,
+            "year": f"{year:04d}",
+            "month": month_prefix,
+            "rows": [],
+            "summary": {
+                "total": 0,
+                "matched": 0,
+                "discrepancies": 0,
+                "movable": 0,
+                "missing": 0,
+                "match_pct": 0.0,
+                "discrepancy_pct": 0.0,
+                "movable_pct": 0.0,
+                "nonmovable_pct": 0.0,
+            },
+        }
+
+    rows: list[dict] = []
+    matched = 0
+    discrepancies = 0
+    movable = 0
+    missing = 0
+
+    for item in items:
+        folder_name = _folder_name_for_item(item)
+        if not folder_name:
+            continue
+
+        year_text = str(item.dig_anio or year).strip() or f"{year:04d}"
+        expediente = str(item.dig_expediente or "").strip()
+        expected_tramite = _expected_tramite_name(item)
+        expected_path = (Settings.LOCAL_REPO_ROOT / year_text / expediente / expected_tramite).resolve()
+        found_paths = _repo_match_paths(year_text, item.dig_expediente, folder_name)
+        expected_exists = expected_path in found_paths
+        wrong_paths = [p for p in found_paths if p != expected_path]
+        source_path = wrong_paths[0] if wrong_paths else None
+        source_exists = source_path is not None and source_path.is_dir()
+
+        if expected_exists and len(found_paths) == 1:
+            matched += 1
+            status = "COINCIDE"
+            continue
+
+        discrepancies += 1
+        if not found_paths:
+            missing += 1
+            status = "NO_EN_REPOSITORIO"
+        elif expected_exists:
+            status = "DUPLICADO_O_DESPLAZADO"
+            if source_exists:
+                movable += 1
+        else:
+            status = "EN_OTRA_RUTA"
+            if source_exists:
+                movable += 1
+
+        rows.append(
+            {
+                "dig_id_tramite": item.dig_id_tramite,
+                "dig_tramite": item.dig_tramite,
+                "dig_anio": item.dig_anio,
+                "dig_expediente": item.dig_expediente,
+                "fe_pla_aniomes": item.fe_pla_aniomes,
+                "dig_area_dep": item.dig_area_dep,
+                "tramite_esperado": expected_tramite,
+                "expected_path": str(expected_path),
+                "found_paths": [str(p) for p in found_paths],
+                "source_path": str(source_path) if source_path else "",
+                "target_path": str(expected_path),
+                "expected_exists": expected_exists,
+                "source_exists": source_exists,
+                "found_count": len(found_paths),
+                "status": status,
+                "movable": source_exists and str(source_path) != str(expected_path),
+                "reason": "source_missing" if not source_exists else "",
+                "candidate": source_exists and str(source_path) != str(expected_path),
+            }
+        )
+
+    total = len(items)
+    return {
+        "aniomes": aniomes,
+        "year": f"{year:04d}",
+        "month": month_prefix,
+        "rows": rows,
+        "summary": {
+            "total": total,
+            "matched": matched,
+            "discrepancies": discrepancies,
+            "movable": movable,
+            "missing": missing,
+            "match_pct": round((matched / total) * 100, 1) if total else 0.0,
+            "discrepancy_pct": round((discrepancies / total) * 100, 1) if total else 0.0,
+            "movable_pct": round((movable / total) * 100, 1) if total else 0.0,
+            "nonmovable_pct": round(((discrepancies - movable) / total) * 100, 1) if total else 0.0,
+        },
+    }
+
+
+def _validation_rows(preview: dict) -> list[dict]:
+    rows = preview.get("rows") or []
+    return [row for row in rows if row.get("movable")]
+
+
+def _run_validation_batch(preview: dict, *, dry_run: bool) -> dict:
+    rows = _validation_rows(preview)
+    results = []
+    for row in rows:
+        payload = {
+            "dig_tramite": row.get("dig_tramite"),
+            "dig_id_tramite": row.get("dig_id_tramite"),
+            "source_path": row.get("source_path"),
+            "target_path": row.get("target_path"),
+        }
+        if not payload["source_path"]:
+            continue
+        results.append(_run_rsync_job(payload, dry_run=dry_run))
+
+    succeeded = sum(1 for row in results if row.get("ok"))
+    failed = len(results) - succeeded
+    return {
+        "mode": "dry_run" if dry_run else "execute",
+        "total": len(results),
+        "succeeded": succeeded,
+        "failed": failed,
+        "results": results,
+    }
+
+
+def _path_validation_job_key() -> str:
+    return "path_validation_job_id"
+
+
+def _path_validation_job_report(
+    *,
+    aniomes: str,
+    year: str,
+    month: str,
+    total: int,
+    matched: int,
+    discrepancies: int,
+    movable: int,
+    missing: int,
+    rows: list[dict],
+) -> dict:
+    return {
+        "aniomes": aniomes,
+        "year": year,
+        "month": month,
+        "rows": rows,
+        "summary": {
+            "total": total,
+            "matched": matched,
+            "discrepancies": discrepancies,
+            "movable": movable,
+            "missing": missing,
+            "match_pct": round((matched / total) * 100, 1) if total else 0.0,
+            "discrepancy_pct": round((discrepancies / total) * 100, 1) if total else 0.0,
+            "movable_pct": round((movable / total) * 100, 1) if total else 0.0,
+            "nonmovable_pct": round(((discrepancies - movable) / total) * 100, 1) if total else 0.0,
+        },
+    }
+
+
+def _path_validation_signature(rows: list[dict]) -> str:
+    parts = []
+    for row in sorted(
+        rows,
+        key=lambda item: (str(item.get("source_path") or ""), str(item.get("target_path") or "")),
+    ):
+        parts.append(f"{row.get('source_path')}->{row.get('target_path')}")
+    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
+
+
+def _path_validation_worker(job_id: str, aniomes: str) -> None:
+    try:
+        items = fetch_items_by_fe_pla_aniomes(aniomes)
+        year = int(aniomes[:4])
+        month = int(aniomes[4:])
+        total = len(items)
+        matched = 0
+        discrepancies = 0
+        movable = 0
+        missing = 0
+        rows: list[dict] = []
+
+        update_job(
+            job_id,
+            status="running",
+            started_at=datetime.now(timezone.utc).isoformat(),
+            last_message="Iniciando revisión",
+            progress={
+                "files_done": 0,
+                "files_total": total,
+                "bytes_done": 0,
+                "bytes_total": total,
+                "folder": "",
+                "file": "",
+            },
+            report=_path_validation_job_report(
+                aniomes=aniomes,
+                year=f"{year:04d}",
+                month=f"{month:02d}",
+                total=total,
+                matched=0,
+                discrepancies=0,
+                movable=0,
+                missing=0,
+                rows=[],
+            ),
+        )
+
+        for idx, item in enumerate(items, start=1):
+            folder_name = _folder_name_for_item(item)
+            year_text = str(item.dig_anio or year).strip() or f"{year:04d}"
+            expediente = str(item.dig_expediente or "").strip()
+            expected_tramite = _expected_tramite_name(item)
+            expected_path = (Settings.LOCAL_REPO_ROOT / year_text / expediente / expected_tramite).resolve()
+            found_paths = _repo_match_paths(year_text, item.dig_expediente, folder_name)
+            expected_exists = expected_path in found_paths
+            wrong_paths = [p for p in found_paths if p != expected_path]
+            source_path = wrong_paths[0] if wrong_paths else None
+            source_exists = source_path is not None and source_path.is_dir()
+
+            if expected_exists and len(found_paths) == 1:
+                matched += 1
+            else:
+                discrepancies += 1
+                if not found_paths:
+                    missing += 1
+                    status = "NO_EN_REPOSITORIO"
+                elif expected_exists:
+                    status = "DUPLICADO_O_DESPLAZADO"
+                    if source_exists:
+                        movable += 1
+                else:
+                    status = "EN_OTRA_RUTA"
+                    if source_exists:
+                        movable += 1
+
+                rows.append(
+                    {
+                        "dig_id_tramite": item.dig_id_tramite,
+                        "dig_tramite": item.dig_tramite,
+                        "dig_anio": item.dig_anio,
+                        "dig_expediente": item.dig_expediente,
+                        "fe_pla_aniomes": item.fe_pla_aniomes,
+                        "dig_area_dep": item.dig_area_dep,
+                        "tramite_esperado": expected_tramite,
+                        "expected_path": str(expected_path),
+                        "found_paths": [str(p) for p in found_paths],
+                        "source_path": str(source_path) if source_path else "",
+                        "target_path": str(expected_path),
+                        "expected_exists": expected_exists,
+                        "source_exists": source_exists,
+                        "found_count": len(found_paths),
+                        "status": status,
+                        "movable": source_exists and str(source_path) != str(expected_path),
+                        "reason": "source_missing" if not source_exists else "",
+                        "candidate": source_exists and str(source_path) != str(expected_path),
+                    }
+                )
+
+            report = _path_validation_job_report(
+                aniomes=aniomes,
+                year=f"{year:04d}",
+                month=f"{month:02d}",
+                total=total,
+                matched=matched,
+                discrepancies=discrepancies,
+                movable=movable,
+                missing=missing,
+                rows=list(rows),
+            )
+            update_job(
+                job_id,
+                progress={
+                    "files_done": idx,
+                    "files_total": total,
+                    "bytes_done": idx,
+                    "bytes_total": total,
+                    "folder": folder_name,
+                    "file": "",
+                },
+                report=report,
+                last_message=f"Revisando {folder_name} ({idx}/{total})",
+            )
+
+        final_report = _path_validation_job_report(
+            aniomes=aniomes,
+            year=f"{year:04d}",
+            month=f"{month:02d}",
+            total=total,
+            matched=matched,
+            discrepancies=discrepancies,
+            movable=movable,
+            missing=missing,
+            rows=rows,
+        )
+        final_report["validation_signature"] = _path_validation_signature(rows)
+
+        update_job(
+            job_id,
+            status="finished",
+            finished_at=datetime.now(timezone.utc).isoformat(),
+            report=final_report,
+            progress={
+                "files_done": total,
+                "files_total": total,
+                "bytes_done": total,
+                "bytes_total": total,
+                "folder": "",
+                "file": "",
+            },
+            last_message="Revisión terminada",
+        )
+    except Exception as exc:
+        update_job(
+            job_id,
+            status="failed",
+            finished_at=datetime.now(timezone.utc).isoformat(),
+            error=str(exc),
+            traceback=traceback.format_exc(),
+            last_message="Revisión fallida",
+        )
+
+
+def _start_path_validation_job(aniomes: str) -> str:
+    job_id = uuid.uuid4().hex[:12]
+    update_job(
+        job_id,
+        job_id_value=job_id,
+        job_type="path_validation",
+        phase="dry_run",
+        aniomes=aniomes,
+        status="queued",
+        created_at=datetime.now(timezone.utc).isoformat(),
+        started_at=None,
+        finished_at=None,
+        progress={"files_done": 0, "files_total": 0, "bytes_done": 0, "bytes_total": 0, "folder": "", "file": ""},
+        log_lines=[],
+        last_message="Trabajo en cola",
+        report={},
+    )
+
+    def _worker():
+        _path_validation_worker(job_id, aniomes)
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return job_id
+
+
+def _build_aniomes_candidates(
+    aniomes: str,
+    area_dep_filter: str | None = None,
+    folder_prefix: str = "HSP",
+) -> dict:
+    area_dep = str(area_dep_filter or "").strip()
+    prefix = str(folder_prefix or "HSP").strip().upper() or "HSP"
+    if area_dep:
+        items = fetch_items_by_fe_pla_aniomes_and_area_dep(aniomes, area_dep)
+    else:
+        items = fetch_items_by_fe_pla_aniomes(aniomes)
+    year = int(aniomes[:4])
+    month = int(aniomes[4:])
+    target_hsp = _folder_code(prefix, month)
     source_year, source_month = _previous_month(year, month)
-    source_hsp = _hsp_from_month(source_month)
+    source_hsp = _folder_code(prefix, source_month)
 
     if not items:
         return {
@@ -240,7 +655,9 @@ def _build_aniomes_candidates(aniomes: str) -> dict:
             "target_hsp": target_hsp,
             "source_hsp": source_hsp,
             "source_year": str(source_year),
+            "folder_prefix": prefix,
             "items": [],
+            "area_dep_filter": area_dep or None,
             "rows": [],
             "summary": {
                 "total": 0,
@@ -278,7 +695,7 @@ def _build_aniomes_candidates(aniomes: str) -> dict:
             status = "CANDIDATA"
         else:
             missing_both += 1
-            status = "NO_EN_HSP03"
+            status = f"NO_EN_{source_hsp}"
 
         rows.append(
             {
@@ -305,6 +722,8 @@ def _build_aniomes_candidates(aniomes: str) -> dict:
         "target_hsp": target_hsp,
         "source_hsp": source_hsp,
         "source_year": f"{source_year:04d}",
+        "folder_prefix": prefix,
+        "area_dep_filter": area_dep or None,
         "items": items,
         "rows": rows,
         "summary": {
@@ -314,6 +733,161 @@ def _build_aniomes_candidates(aniomes: str) -> dict:
             "missing_both": missing_both,
         },
     }
+
+
+def _sync_cases_session_key(screen_key: str) -> str:
+    return f"sync_cases_dry_run_{screen_key}"
+
+
+def _handle_sync_cases(
+    screen_key: str,
+    screen_title: str,
+    area_dep_filter: str | None = None,
+    folder_prefix: str = "HSP",
+):
+    preview = None
+    last_aniomes = ""
+    action = "preview"
+    session_key = _sync_cases_session_key(screen_key)
+
+    if request.method == "POST":
+        last_aniomes = _extract_aniomes(request.form)
+        action = (request.form.get("action") or "preview").strip()
+        if not _validate_aniomes(last_aniomes):
+            flash("ANIOMES debe tener 6 dígitos, por ejemplo 202604.", "error")
+            return render_template(
+                "sync_candidates.html",
+                defaults=Settings,
+                last_aniomes=last_aniomes,
+                username=session.get("username"),
+                can_execute=False,
+                screen_title=screen_title,
+            )
+
+        try:
+            preview = _build_aniomes_candidates(
+                last_aniomes,
+                area_dep_filter=area_dep_filter,
+                folder_prefix=folder_prefix,
+            )
+            preview["sync_signature"] = _sync_candidate_signature(preview)
+
+            if int(preview.get("summary", {}).get("total") or 0) == 0:
+                flash(
+                    "No se encontraron registros Oracle para ese ANIOMES o no tenían carpeta válida.",
+                    "error",
+                )
+            else:
+                if action == "dry_run":
+                    preview["sync_run"] = _run_sync_batch(preview, dry_run=True)
+                    session[session_key] = {
+                        "aniomes": last_aniomes,
+                        "signature": preview["sync_signature"],
+                    }
+                    flash(
+                        "Dry run completado. Revisa el detalle antes de ejecutar.",
+                        "ok",
+                    )
+                elif action == "execute":
+                    token = session.get(session_key) or {}
+                    if (
+                        token.get("aniomes") != last_aniomes
+                        or token.get("signature") != preview["sync_signature"]
+                    ):
+                        flash(
+                            "Primero debes hacer un dry run en la web con el mismo ANIOMES.",
+                            "error",
+                        )
+                    else:
+                        preview["sync_run"] = _run_sync_batch(preview, dry_run=False)
+                        session.pop(session_key, None)
+                        flash(
+                            "Ejecución finalizada. Revisa el resumen y los resultados por carpeta.",
+                            "ok" if preview["sync_run"]["failed"] == 0 else "error",
+                        )
+        except Exception as exc:
+            flash(f"Error consultando Oracle o el repositorio local: {exc}", "error")
+
+    can_execute = False
+    if preview:
+        token = session.get(session_key) or {}
+        can_execute = (
+            bool(preview.get("sync_signature"))
+            and token.get("aniomes") == last_aniomes
+            and token.get("signature") == preview.get("sync_signature")
+        )
+
+    return render_template(
+        "sync_candidates.html",
+        defaults=Settings,
+        preview=preview,
+        last_aniomes=last_aniomes,
+        username=session.get("username"),
+        can_execute=can_execute,
+        screen_title=screen_title,
+        area_dep_filter=area_dep_filter,
+        folder_prefix=folder_prefix,
+    )
+
+
+def _handle_path_validation(screen_key: str, screen_title: str):
+    preview = None
+    last_aniomes = ""
+    active_job = None
+    auto_refresh = False
+    session_key = _path_validation_job_key()
+    job_id = session.get(session_key)
+    job = get_job(str(job_id)) if job_id else None
+
+    if job:
+        active_job = dict(job)
+        preview = dict(job.get("report") or {}) or None
+        last_aniomes = str(job.get("aniomes") or "")
+        auto_refresh = active_job.get("status") in {"queued", "waiting", "running"}
+
+    if request.method == "POST":
+        action = (request.form.get("action") or "preview").strip()
+        last_aniomes = _extract_aniomes(request.form) or last_aniomes
+
+        if action == "dry_run":
+            if not _validate_aniomes(last_aniomes):
+                flash("ANIOMES debe tener 6 dígitos, por ejemplo 202604.", "error")
+            else:
+                job_id = _start_path_validation_job(last_aniomes)
+                session[session_key] = job_id
+                flash("Revisión iniciada. La pantalla se actualizará sola mientras avanza.", "ok")
+                return redirect(url_for("path_validation"))
+
+        if action == "execute":
+            if not job or job.get("status") != "finished" or not job.get("report"):
+                flash("Primero debes completar la revisión en la misma sesión.", "error")
+            else:
+                preview = dict(job.get("report") or {})
+                preview["sync_run"] = _run_validation_batch(preview, dry_run=False)
+                flash(
+                    "Ejecución finalizada. Revisa el resumen y las rutas procesadas.",
+                    "ok" if preview["sync_run"]["failed"] == 0 else "error",
+                )
+
+    can_execute = bool(
+        job
+        and job.get("status") == "finished"
+        and (job.get("report") or {}).get("validation_signature")
+    )
+
+    return render_template(
+        "path_validation.html",
+        defaults=Settings,
+        preview=preview,
+        last_aniomes=last_aniomes,
+        username=session.get("username"),
+        can_execute=can_execute,
+        screen_title=screen_title,
+        active_job=active_job,
+        auto_refresh=auto_refresh,
+        progress_pct=_progress_pct(active_job),
+        duration_text=_duration_text,
+    )
 
 
 def _job_report_file(job_id: str, report_key: str) -> Path:
@@ -328,6 +902,59 @@ def _job_report_file(job_id: str, report_key: str) -> Path:
         abort(404)
 
     return file_path
+
+
+def _validation_report_csv(job_id: str) -> tuple[io.BytesIO, str]:
+    job = get_job(job_id)
+    if job is None:
+        abort(404)
+
+    report = job.get("report") or {}
+    rows = report.get("rows") or []
+    buffer = io.StringIO()
+    fieldnames = [
+        "dig_id_tramite",
+        "dig_tramite",
+        "dig_anio",
+        "dig_expediente",
+        "fe_pla_aniomes",
+        "dig_area_dep",
+        "tramite_esperado",
+        "status",
+        "expected_path",
+        "source_path",
+        "target_path",
+        "found_paths",
+        "movable",
+        "reason",
+    ]
+
+    writer = csv.DictWriter(buffer, fieldnames=fieldnames)
+    writer.writeheader()
+    for row in rows:
+        writer.writerow(
+            {
+                "dig_id_tramite": row.get("dig_id_tramite"),
+                "dig_tramite": row.get("dig_tramite"),
+                "dig_anio": row.get("dig_anio"),
+                "dig_expediente": row.get("dig_expediente"),
+                "fe_pla_aniomes": row.get("fe_pla_aniomes"),
+                "dig_area_dep": row.get("dig_area_dep"),
+                "tramite_esperado": row.get("tramite_esperado"),
+                "status": row.get("status"),
+                "expected_path": row.get("expected_path"),
+                "source_path": row.get("source_path"),
+                "target_path": row.get("target_path"),
+                "found_paths": " | ".join(row.get("found_paths") or []),
+                "movable": row.get("movable"),
+                "reason": row.get("reason"),
+            }
+        )
+
+    payload = buffer.getvalue().encode("utf-8")
+    data = io.BytesIO(payload)
+    data.seek(0)
+    return data, f"validation_{job_id}.csv"
 
 
 @app.get("/healthz")
@@ -485,79 +1112,37 @@ def diagnostics():
 @app.route("/sync-candidates", methods=["GET", "POST"])
 @login_required
 def sync_candidates():
-    preview = None
-    last_aniomes = ""
-    action = "preview"
+    return _handle_sync_cases(
+        "hospitalizacion", "HOSPITALIZACION CASOS", area_dep_filter="HSP"
+    )
 
-    if request.method == "POST":
-        last_aniomes = _extract_aniomes(request.form)
-        action = (request.form.get("action") or "preview").strip()
-        if not _validate_aniomes(last_aniomes):
-            flash("ANIOMES debe tener 6 dígitos, por ejemplo 202604.", "error")
-            return render_template(
-                "sync_candidates.html",
-                defaults=Settings,
-                last_aniomes=last_aniomes,
-                username=session.get("username"),
-                can_execute=False,
-            )
 
-        try:
-            preview = _build_aniomes_candidates(last_aniomes)
-            preview["sync_signature"] = _sync_candidate_signature(preview)
+@app.route("/urgencias-casos", methods=["GET", "POST"])
+@login_required
+def urgencias_cases():
+    return _handle_sync_cases(
+        "urgencias",
+        "URGENCIAS CASOS",
+        area_dep_filter="URG",
+        folder_prefix="URG",
+    )
 
-            if int(preview.get("summary", {}).get("total") or 0) == 0:
-                flash(
-                    "No se encontraron registros Oracle para ese ANIOMES o no tenían carpeta válida.",
-                    "error",
-                )
-            else:
-                if action == "dry_run":
-                    preview["sync_run"] = _run_sync_batch(preview, dry_run=True)
-                    session["sync_candidates_dry_run"] = {
-                        "aniomes": last_aniomes,
-                        "signature": preview["sync_signature"],
-                    }
-                    flash(
-                        "Dry run completado. Revisa el detalle antes de ejecutar.",
-                        "ok",
-                    )
-                elif action == "execute":
-                    token = session.get("sync_candidates_dry_run") or {}
-                    if (
-                        token.get("aniomes") != last_aniomes
-                        or token.get("signature") != preview["sync_signature"]
-                    ):
-                        flash(
-                            "Primero debes hacer un dry run en la web con el mismo ANIOMES.",
-                            "error",
-                        )
-                    else:
-                        preview["sync_run"] = _run_sync_batch(preview, dry_run=False)
-                        session.pop("sync_candidates_dry_run", None)
-                        flash(
-                            "Ejecución finalizada. Revisa el resumen y los resultados por carpeta.",
-                            "ok" if preview["sync_run"]["failed"] == 0 else "error",
-                        )
-        except Exception as exc:
-            flash(f"Error consultando Oracle o el repositorio local: {exc}", "error")
 
-    can_execute = False
-    if preview:
-        token = session.get("sync_candidates_dry_run") or {}
-        can_execute = (
-            bool(preview.get("sync_signature"))
-            and token.get("aniomes") == last_aniomes
-            and token.get("signature") == preview.get("sync_signature")
-        )
+@app.route("/path-validation", methods=["GET", "POST"])
+@login_required
+def path_validation():
+    return _handle_path_validation("path_validation", "VALIDACION DE RUTAS")
 
-    return render_template(
-        "sync_candidates.html",
-        defaults=Settings,
-        preview=preview,
-        last_aniomes=last_aniomes,
-        username=session.get("username"),
-        can_execute=can_execute,
+
+@app.get("/jobs/<job_id>/download-validation-csv")
+@login_required
+def job_download_validation_csv(job_id: str):
+    data, filename = _validation_report_csv(job_id)
+    return send_file(
+        data,
+        as_attachment=True,
+        download_name=filename,
+        mimetype="text/csv",
     )
 
 
