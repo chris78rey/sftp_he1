@@ -5,7 +5,9 @@
 
 <div class="card">
   <p><b>Job:</b> {{ job.job_id_value }}</p>
+  <p><b>Inicio:</b> {{ format_datetime_local(job.started_at or job.created_at) }}</p>
   <p><b>Búsqueda:</b> {% if job.search_mode == 'dig_tramite' %}DIG_TRAMITE{% else %}DIG_ID_TRAMITE{% endif %} = {{ job.search_value or job.dig_id_tramite }}</p>
+  <p><b>Fuente:</b> {% if job.source_mode == 'local' %}Repositorio local{% else %}SFTP{% endif %}</p>
   <p><b>Estado:</b> {{ job.status }}</p>
   <p><b>Duración:</b> {{ duration_text(job) }}</p>
   <p><b>Último mensaje:</b> {{ job.last_message or '-' }}</p>
@@ -43,10 +45,10 @@
 
     <hr style="margin:18px 0; border:none; border-top:1px solid #e5e7eb;">
 
-    <p><b>Base remota detectada:</b> <code>{{ job.report.remote_base_detected }}</code></p>
+    <p><b>Base detectada:</b> <code>{{ job.report.remote_base_detected }}</code></p>
     <p><b>Carpetas esperadas según Oracle:</b> {{ job.report.expected_folders or 0 }}</p>
-    <p><b>Carpetas encontradas en SFTP:</b> {{ job.report.found_folders or 0 }}</p>
-    <p><b>Carpetas faltantes en SFTP:</b> {{ job.report.missing_folders or 0 }}</p>
+    <p><b>Carpetas encontradas:</b> {{ job.report.found_folders or 0 }}</p>
+    <p><b>Carpetas faltantes:</b> {{ job.report.missing_folders or 0 }}</p>
 
     {% if job.report.folder_quadrature_enabled %}
       <p><b>Carpetas representadas dentro del ZIP:</b> {{ job.report.represented_folders_in_zip or 0 }}</p>

@@ -41,6 +41,7 @@
 <div class="card">
   <h2>Trabajo activo</h2>
   <p><b>Job:</b> {{ active_job.job_id_value }}</p>
+  <p><b>Inicio:</b> {{ format_datetime_local(active_job.started_at or active_job.created_at) }}</p>
   <p><b>Búsqueda:</b> {% if active_job.search_mode == 'dig_tramite' %}DIG_TRAMITE{% else %}DIG_ID_TRAMITE{% endif %} = {{ active_job.search_value or active_job.dig_id_tramite }}</p>
   <p><b>Estado:</b> {{ active_job.status }}</p>
   <p><b>Duración:</b> {{ duration_text(active_job) }}</p>
@@ -55,6 +56,7 @@
     <thead>
       <tr>
         <th>Job</th>
+        <th>Inicio</th>
         <th>Búsqueda</th>
         <th>Estado</th>
         <th>Duración</th>
@@ -69,6 +71,7 @@
       {% set found_count = (job.report.found_folders if job.report else 0) or 0 %}
       <tr>
         <td><a href="/jobs/{{ job.job_id_value }}">{{ job.job_id_value }}</a></td>
+        <td>{{ format_datetime_local(job.started_at or job.created_at) }}</td>
         <td>{% if job.search_mode == 'dig_tramite' %}DIG_TRAMITE{% else %}DIG_ID_TRAMITE{% endif %} = {{ job.search_value or job.dig_id_tramite }}</td>
         <td>{{ job.status }}</td>
         <td>{{ duration_text(job) }}</td>
@@ -106,7 +109,8 @@
   <form method="post" action="/start">
     <input type="hidden" name="search_mode" value="{{ preview['search_mode'] }}">
     <input type="hidden" name="search_value" value="{{ preview['search_value'] }}">
-    <button type="submit">Iniciar descarga</button>
+    <input type="hidden" name="source_mode" value="local">
+    <button type="submit">Iniciar descarga optimizada</button>
   </form>
   <table>
     <thead><tr><th>DIG_TRAMITE</th><th>AÑO</th><th>EXPEDIENTE</th><th>AREA</th><th>RUTA</th></tr></thead>

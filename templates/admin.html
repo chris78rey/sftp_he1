@@ -19,4 +19,43 @@
     <button type="submit" style="background:#b91c1c;">Limpiar todo output</button>
   </form>
 </div>
+
+<div class="card">
+  <h2>Descargas recientes</h2>
+  {% if download_history %}
+  <table>
+    <thead>
+      <tr>
+        <th>Generado</th>
+        <th>Búsqueda</th>
+        <th>Trámites</th>
+        <th>Archivos</th>
+        <th>Peso</th>
+        <th>ZIP</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for item in download_history %}
+      <tr>
+        <td>{{ item.generated_at }}</td>
+        <td>{{ item.search_mode }} = {{ item.search_value }}</td>
+        <td>{{ item.found_folders }}/{{ item.expected_folders }} <span class="muted">(faltan {{ item.missing_folders }})</span></td>
+        <td>{{ item.total_files }}</td>
+        <td>{{ item.total_bytes | human_bytes }}</td>
+        <td>
+          {% if item.zip_exists %}
+            <a class="btn secondary" href="/admin/download-output/{{ item.zip_rel }}">Descargar ZIP</a><br>
+            <span class="muted">{{ item.zip_rel }}</span>
+          {% else %}
+            <span class="muted">No existe</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="muted">No hay descargas registradas en output todavía.</p>
+  {% endif %}
+</div>
 {% endblock %}

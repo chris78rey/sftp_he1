@@ -4,6 +4,7 @@ import functools
 import hashlib
 import io
 import csv
+import json
 import os
 import re
 import shlex
@@ -11,8 +12,13 @@ import subprocess
 import threading
 import traceback
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
+
+try:
+    from zoneinfo import ZoneInfo
+except Exception:  # pragma: no cover
+    ZoneInfo = None
 
 from flask import (
     Flask,
@@ -59,6 +65,35 @@ def _progress_pct(job: dict | None) -> int:
     return int((done / total) * 100) if total > 0 else 0
 
 
+def _ecuador_tz():
+    if ZoneInfo is not None:
+        try:
+            return ZoneInfo("America/Guayaquil")
+        except Exception:
+            pass
+    return timezone(timedelta(hours=-5))
+
+
+def _now_ecuador_iso() -> str:
+    return datetime.now(_ecuador_tz()).isoformat()
+
+
+def _format_datetime_local(value: str | None) -> str:
+    if not value:
+        return "-"
+    try:
+        dt = datetime.fromisoformat(str(value))
+    except Exception:
+        return str(value)
+
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    try:
+        return dt.astimezone(_ecuador_tz()).strftime("%Y-%m-%d %H:%M:%S")
+    except Exception:
+        return str(value)
+
+
 def _duration_text(job: dict | None) -> str:
     if not job:
         return "-"
@@ -77,13 +112,69 @@ def _duration_text(job: dict | None) -> str:
             if finished.tzinfo is None:
                 finished = finished.replace(tzinfo=timezone.utc)
         except Exception:
-            finished = datetime.now(timezone.utc)
+            finished = datetime.now(_ecuador_tz())
     else:
-        finished = datetime.now(timezone.utc)
+        finished = datetime.now(_ecuador_tz())
     seconds = max(0, int((finished - started).total_seconds()))
     mins, secs = divmod(seconds, 60)
     hours, mins = divmod(mins, 60)
     return f"{hours}h {mins}m {secs}s" if hours else f"{mins}m {secs}s"
+
+
+def _load_download_history(root: Path, limit: int = 20) -> list[dict]:
+    history: list[dict] = []
+    if not root.exists():
+        return history
+
+    for manifest_path in root.rglob("manifest.json"):
+        try:
+            with manifest_path.open("r", encoding="utf-8") as fh:
+                manifest = json.load(fh)
+        except Exception:
+            continue
+
+        zip_path = manifest_path.parent.with_name(f"{manifest_path.parent.name}.zip")
+        generated_at = str(manifest.get("generated_at") or "").strip()
+        try:
+            sort_key = datetime.fromisoformat(generated_at)
+        except Exception:
+            try:
+                sort_key = datetime.fromtimestamp(manifest_path.stat().st_mtime, tz=_ecuador_tz())
+            except Exception:
+                sort_key = datetime.now(_ecuador_tz())
+
+        history.append(
+            {
+                "manifest_rel": str(manifest_path.relative_to(root)),
+                "zip_rel": str(zip_path.relative_to(root)),
+                "zip_exists": zip_path.exists(),
+                "search_mode": manifest.get("search_mode") or "-",
+                "search_value": manifest.get("search_value") or "-",
+                "generated_at": generated_at or "-",
+                "expected_folders": manifest.get("expected_folders", 0),
+                "found_folders": manifest.get("found_folders", 0),
+                "missing_folders": manifest.get("missing_folders", 0),
+                "total_files": manifest.get("total_files", 0),
+                "total_bytes": manifest.get("total_bytes", 0),
+                "_sort_key": sort_key,
+            }
+        )
+
+    history.sort(key=lambda item: item["_sort_key"], reverse=True)
+    for item in history:
+        item.pop("_sort_key", None)
+    return history[:limit]
+
+
+def _safe_output_path(relative_path: str) -> Path:
+    root = Settings.DOWNLOAD_OUTPUT_ROOT.resolve()
+    rel = (relative_path or "").strip().lstrip("/\\")
+    target = (root / rel).resolve()
+    if root not in target.parents and target != root:
+        abort(404)
+    if not target.exists() or not target.is_file():
+        abort(404)
+    return target
 
 
 def _search_mode_label(mode: str | None) -> str:
@@ -467,7 +558,7 @@ def _path_validation_worker(job_id: str, aniomes: str) -> None:
         update_job(
             job_id,
             status="running",
-            started_at=datetime.now(timezone.utc).isoformat(),
+            started_at=_now_ecuador_iso(),
             last_message="Iniciando revisión",
             progress={
                 "files_done": 0,
@@ -582,7 +673,7 @@ def _path_validation_worker(job_id: str, aniomes: str) -> None:
         update_job(
             job_id,
             status="finished",
-            finished_at=datetime.now(timezone.utc).isoformat(),
+            finished_at=_now_ecuador_iso(),
             report=final_report,
             progress={
                 "files_done": total,
@@ -598,7 +689,7 @@ def _path_validation_worker(job_id: str, aniomes: str) -> None:
         update_job(
             job_id,
             status="failed",
-            finished_at=datetime.now(timezone.utc).isoformat(),
+            finished_at=_now_ecuador_iso(),
             error=str(exc),
             traceback=traceback.format_exc(),
             last_message="Revisión fallida",
@@ -614,7 +705,7 @@ def _start_path_validation_job(aniomes: str) -> str:
         phase="dry_run",
         aniomes=aniomes,
         status="queued",
-        created_at=datetime.now(timezone.utc).isoformat(),
+        created_at=_now_ecuador_iso(),
         started_at=None,
         finished_at=None,
         progress={"files_done": 0, "files_total": 0, "bytes_done": 0, "bytes_total": 0, "folder": "", "file": ""},
@@ -1004,6 +1095,7 @@ def home():
         jobs=jobs,
         active_job=active,
         duration_text=_duration_text,
+        format_datetime_local=_format_datetime_local,
     )
 
 
@@ -1014,6 +1106,7 @@ def admin():
     pdfs = []
     zips = []
     total_size = 0
+    download_history = _load_download_history(root)
 
     for path in root.rglob("*"):
         if path.is_file():
@@ -1037,6 +1130,7 @@ def admin():
         total_bytes=total_bytes,
         total_output_bytes=total_size,
         output_root=str(root),
+        download_history=download_history,
     )
 
 
@@ -1098,6 +1192,17 @@ def cleanup_output():
         "ok",
     )
     return redirect(url_for("admin"))
+
+
+@app.get("/admin/download-output/<path:relative_path>")
+@login_required
+def admin_download_output(relative_path: str):
+    target = _safe_output_path(relative_path)
+    return send_file(
+        str(target),
+        as_attachment=True,
+        download_name=target.name,
+    )
 
 
 @app.get("/diagnostics")
@@ -1188,6 +1293,9 @@ def preview():
 @login_required
 def start():
     search_mode, raw = _extract_search(request.form)
+    source_mode = (request.form.get("source_mode") or "local").strip().lower()
+    if source_mode not in {"local", "sftp"}:
+        source_mode = "local"
 
     if not raw.isdigit():
         flash(f"{_search_mode_label(search_mode)} debe ser numérico.", "error")
@@ -1222,7 +1330,10 @@ def start():
         )
 
     job_id = create_job(
-        str(preview_data.get("search_mode") or search_mode), raw, preview_data
+        str(preview_data.get("search_mode") or search_mode),
+        raw,
+        preview_data,
+        source_mode=source_mode,
     )
     run_job_async(job_id)
     return redirect(url_for("job_view", job_id=job_id))
@@ -1239,6 +1350,7 @@ def job_view(job_id: str):
         job=job,
         progress_pct=_progress_pct(job),
         duration_text=_duration_text,
+        format_datetime_local=_format_datetime_local,
     )
 
 
