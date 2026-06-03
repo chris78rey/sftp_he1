@@ -61,6 +61,10 @@ sudo ./install_systemd.sh
 
 La URL sigue siendo la misma, normalmente `http://127.0.0.1:5085` o la que tenga tu proxy delante.
 
+Para operación detallada del sistema consulta la guía:
+
+- [`guia_para_levantar_servicios.md`](./guia_para_levantar_servicios.md)
+
 ## Como servicio de usuario
 
 Si no quieres usar `sudo`, puedes instalarlo como servicio de usuario:
