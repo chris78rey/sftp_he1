@@ -6,7 +6,6 @@ import posixpath
 import shutil
 import stat
 import time
-import subprocess
 import zipfile
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -46,12 +45,41 @@ def _should_download_file(filename: str) -> bool:
     return lower.endswith(".pdf")
 
 
+def _is_hidden_name(name: str) -> bool:
+    return str(name or "").startswith(".")
+
+
 def _remote_join(base: str, rel_path: str) -> str:
     base = (base or "").replace("\\", "/").strip()
     rel_path = (rel_path or "").replace("\\", "/").strip().strip("/")
     if not base or base == ".":
         return rel_path or "."
     return posixpath.normpath(posixpath.join(base, rel_path))
+
+
+def _item_expediente_variants(item: FolderItem) -> list[str]:
+    expediente = str(item.dig_expediente or "").strip()
+    variants: list[str] = []
+    if expediente:
+        variants.append(expediente)
+
+    aniomes = str(item.fe_pla_aniomes or "").strip()
+    if expediente and len(aniomes) == 6 and aniomes.isdigit():
+        month_suffix = aniomes[4:]
+        if not expediente[-2:].isdigit():
+            month_variant = f"{expediente}{month_suffix}"
+            if month_variant not in variants:
+                variants.append(month_variant)
+
+    return variants
+
+
+def _item_relative_paths(item: FolderItem) -> list[str]:
+    year = str(item.dig_anio or "").strip()
+    tramite = _safe_name(item.dig_tramite)
+    variants = _item_expediente_variants(item)
+    rel_paths = [f"{year}/{exp}/{tramite}" for exp in variants if year and exp and tramite]
+    return rel_paths
 
 
 def _candidate_bases(requested: str) -> list[str]:
@@ -86,7 +114,8 @@ def _pick_remote_base(
         hits = 0
         misses = 0
         for item in items:
-            if _is_dir(sftp, _remote_join(base, item.remote_rel_path)):
+            rel_paths = _item_relative_paths(item)
+            if any(_is_dir(sftp, _remote_join(base, rel_path)) for rel_path in rel_paths):
                 hits += 1
             else:
                 misses += 1
@@ -95,6 +124,66 @@ def _pick_remote_base(
             best_hits = hits
             best_base = base
     return best_base, probes
+
+
+def _resolve_local_source_dir(root: Path, item: FolderItem) -> tuple[Path | None, str, list[str]]:
+    rel_candidates = _item_relative_paths(item)
+    year_root = (root / str(item.dig_anio or "").strip()).resolve()
+
+    for rel_path in rel_candidates:
+        candidate = (root / rel_path).resolve()
+        if candidate.is_dir():
+            return candidate, rel_path, rel_candidates
+
+    if not year_root.exists():
+        return None, (rel_candidates[0] if rel_candidates else ""), rel_candidates
+
+    tramite = _safe_name(item.dig_tramite)
+    expediente_variants = _item_expediente_variants(item)
+    matches: list[Path] = []
+
+    try:
+        for found in year_root.rglob(tramite):
+            if not found.is_dir():
+                continue
+            parent_name = found.parent.name.strip()
+            if parent_name in expediente_variants or any(
+                parent_name.startswith(exp) for exp in expediente_variants
+            ):
+                resolved = found.resolve()
+                if resolved not in matches:
+                    matches.append(resolved)
+    except Exception:
+        pass
+
+    if len(matches) == 1:
+        chosen = matches[0]
+        return chosen, str(chosen.relative_to(root).as_posix()), rel_candidates
+
+    if len(matches) > 1:
+        def _match_key(path: Path) -> tuple[int, str]:
+            parent_name = path.parent.name.strip()
+            try:
+                exp_idx = expediente_variants.index(parent_name)
+            except ValueError:
+                exp_idx = len(expediente_variants)
+            return exp_idx, str(path)
+
+        chosen = sorted(matches, key=_match_key)[0]
+        return chosen, str(chosen.relative_to(root).as_posix()), rel_candidates
+
+    return None, (rel_candidates[0] if rel_candidates else ""), rel_candidates
+
+
+def _resolve_remote_source_dir(
+    sftp: paramiko.SFTPClient, base: str, item: FolderItem
+) -> tuple[str | None, str]:
+    rel_candidates = _item_relative_paths(item)
+    for rel_path in rel_candidates:
+        remote_dir = _remote_join(base, rel_path)
+        if _is_dir(sftp, remote_dir):
+            return remote_dir, rel_path
+    return None, (rel_candidates[0] if rel_candidates else "")
 
 
 def _count_recursive(sftp: paramiko.SFTPClient, remote_dir: str) -> tuple[int, int]:
@@ -148,6 +237,8 @@ def _download_recursive(
         sftp.listdir_attr(remote_dir), key=lambda x: x.filename.lower()
     ):
         if entry.filename in {".", ".."}:
+            continue
+        if _is_hidden_name(entry.filename):
             continue
 
         remote_child = posixpath.join(remote_dir, entry.filename)
@@ -212,6 +303,8 @@ def _copy_local_recursive(
     total_bytes = 0
 
     for entry in sorted(source_dir.iterdir(), key=lambda p: p.name.lower()):
+        if _is_hidden_name(entry.name):
+            continue
         if entry.is_dir():
             f_count, b_count = _copy_local_recursive(
                 entry,
@@ -273,6 +366,8 @@ def _zip_dir(src_dir: Path, zip_path: Path) -> None:
 
         for path in all_paths:
             rel = path.relative_to(src_dir).as_posix()
+            if any(part.startswith(".") for part in path.relative_to(src_dir).parts):
+                continue
 
             if path.is_dir():
                 rel_dir = rel.rstrip("/") + "/"
@@ -296,83 +391,6 @@ def _zip_dir(src_dir: Path, zip_path: Path) -> None:
                         seen_dirs.add(rel_dir)
 
                 zf.write(path, arcname=rel)
-
-
-def _compress_pdf_with_ghostscript(pdf_path: Path, *, log_cb=None) -> bool:
-    if not pdf_path.is_file() or pdf_path.suffix.lower() != ".pdf":
-        return False
-
-    tmp_path = pdf_path.with_suffix(".gs.tmp.pdf")
-    cmd = [
-        "gs",
-        "-q",
-        "-dNOPAUSE",
-        "-dBATCH",
-        "-dSAFER",
-        "-sDEVICE=pdfwrite",
-        "-dCompatibilityLevel=1.4",
-        "-dDetectDuplicateImages=true",
-        "-dCompressFonts=true",
-        "-dSubsetFonts=true",
-        "-dPDFSETTINGS=/ebook",
-        f"-sOutputFile={str(tmp_path)}",
-        str(pdf_path),
-    ]
-
-    try:
-        proc = subprocess.run(cmd, capture_output=True, text=True)
-        if proc.returncode != 0 or not tmp_path.exists():
-            if log_cb:
-                log_cb(f"Ghostscript falló para {pdf_path.name}: {proc.stderr.strip() or proc.stdout.strip() or 'sin detalle'}")
-            try:
-                tmp_path.unlink(missing_ok=True)
-            except Exception:
-                pass
-            return False
-
-        try:
-            original_size = pdf_path.stat().st_size
-            new_size = tmp_path.stat().st_size
-        except Exception:
-            original_size = 0
-            new_size = 0
-
-        if new_size > 0 and (original_size == 0 or new_size < original_size):
-            tmp_path.replace(pdf_path)
-            if log_cb:
-                log_cb(f"PDF optimizado con Ghostscript: {pdf_path.name} ({original_size} -> {new_size} bytes)")
-            return True
-
-        try:
-            tmp_path.unlink(missing_ok=True)
-        except Exception:
-            pass
-        return False
-    except Exception as exc:
-        if log_cb:
-            log_cb(f"Ghostscript no pudo procesar {pdf_path.name}: {exc}")
-        try:
-            tmp_path.unlink(missing_ok=True)
-        except Exception:
-            pass
-        return False
-
-
-def _compress_pdfs_recursive(root: Path, *, log_cb=None) -> dict:
-    summary = {"checked": 0, "optimized": 0, "skipped": 0}
-    if not root.exists():
-        return summary
-
-    for pdf_path in sorted(root.rglob("*.pdf")):
-        if not pdf_path.is_file():
-            continue
-        summary["checked"] += 1
-        ok = _compress_pdf_with_ghostscript(pdf_path, log_cb=log_cb)
-        if ok:
-            summary["optimized"] += 1
-        else:
-            summary["skipped"] += 1
-    return summary
 
 
 def cleanup_job_artifacts(job_root: str | Path | None) -> None:
@@ -538,6 +556,7 @@ def run_download(
         "fe_pla_aniomes",
         "dig_area_dep",
         "remote_rel_path",
+        "resolved_rel_path",
         "remote_dir",
         "local_dir",
         "status_sftp",
@@ -564,10 +583,12 @@ def run_download(
                 log_cb(f"Usando repositorio local: {detected_base}")
 
             for item in items:
-                source_dir = (Settings.LOCAL_REPO_ROOT / item.remote_rel_path).resolve()
+                source_dir, resolved_rel_path, rel_candidates = _resolve_local_source_dir(
+                    Settings.LOCAL_REPO_ROOT, item
+                )
                 local_dir = _local_dir_for_item(mode, data_root, item)
 
-                if source_dir.is_dir():
+                if source_dir is not None and source_dir.is_dir():
                     f_count, b_count = _count_local_recursive(source_dir)
                     planned.append((item, str(source_dir), local_dir, f_count, b_count))
                     files_total += f_count
@@ -584,6 +605,7 @@ def run_download(
                             "fe_pla_aniomes": item.fe_pla_aniomes,
                             "dig_area_dep": item.dig_area_dep,
                             "remote_rel_path": item.remote_rel_path,
+                            "resolved_rel_path": resolved_rel_path or item.remote_rel_path,
                             "remote_dir": str(source_dir),
                             "local_dir": str(local_dir),
                             "status_sftp": "FOUND",
@@ -604,7 +626,8 @@ def run_download(
                         "fe_pla_aniomes": item.fe_pla_aniomes,
                         "dig_area_dep": item.dig_area_dep,
                         "remote_rel_path": item.remote_rel_path,
-                        "remote_dir": str(source_dir),
+                        "resolved_rel_path": resolved_rel_path or item.remote_rel_path,
+                        "remote_dir": str(source_dir) if source_dir else "",
                         "local_dir": str(local_dir),
                         "reason": "local_folder_not_found",
                         "files": 0,
@@ -622,7 +645,8 @@ def run_download(
                         "fe_pla_aniomes": item.fe_pla_aniomes,
                         "dig_area_dep": item.dig_area_dep,
                         "remote_rel_path": item.remote_rel_path,
-                        "remote_dir": str(source_dir),
+                        "resolved_rel_path": resolved_rel_path or item.remote_rel_path,
+                        "remote_dir": str(source_dir) if source_dir else "",
                         "local_dir": str(local_dir),
                         "status_sftp": "MISSING",
                         "reason": "local_folder_not_found",
@@ -633,7 +657,11 @@ def run_download(
                     missing_rows.append(row)
 
                     if log_cb:
-                        log_cb(f"FALTANTE LOCAL: {item.dig_tramite} -> {source_dir}")
+                        candidate_text = ", ".join(rel_candidates)
+                        log_cb(
+                            f"FALTANTE LOCAL: {item.dig_tramite} -> {resolved_rel_path or item.remote_rel_path}"
+                            + (f" | candidatos: {candidate_text}" if candidate_text else "")
+                        )
 
             counters = {
                 "files_done": 0,
@@ -665,6 +693,7 @@ def run_download(
                         "fe_pla_aniomes": item.fe_pla_aniomes,
                         "dig_area_dep": item.dig_area_dep,
                         "remote_rel_path": item.remote_rel_path,
+                        "resolved_rel_path": resolved_rel_path or item.remote_rel_path,
                         "remote_dir": str(source_dir),
                         "local_dir": str(local_dir),
                         "files": f_count,
@@ -690,10 +719,12 @@ def run_download(
                 log_cb(f"Base remota detectada: {detected_base!r}")
 
             for item in items:
-                remote_dir = _remote_join(detected_base, item.remote_rel_path)
+                remote_dir, resolved_rel_path = _resolve_remote_source_dir(
+                    sftp, detected_base, item
+                )
                 local_dir = _local_dir_for_item(mode, data_root, item)
 
-                if _is_dir(sftp, remote_dir):
+                if remote_dir:
                     f_count, b_count = _count_recursive(sftp, remote_dir)
                     planned.append((item, remote_dir, local_dir, f_count, b_count))
                     files_total += f_count
@@ -710,6 +741,7 @@ def run_download(
                             "fe_pla_aniomes": item.fe_pla_aniomes,
                             "dig_area_dep": item.dig_area_dep,
                             "remote_rel_path": item.remote_rel_path,
+                            "resolved_rel_path": resolved_rel_path or item.remote_rel_path,
                             "remote_dir": remote_dir,
                             "local_dir": str(local_dir),
                             "status_sftp": "FOUND",
@@ -730,7 +762,8 @@ def run_download(
                         "fe_pla_aniomes": item.fe_pla_aniomes,
                         "dig_area_dep": item.dig_area_dep,
                         "remote_rel_path": item.remote_rel_path,
-                        "remote_dir": remote_dir,
+                        "resolved_rel_path": resolved_rel_path or item.remote_rel_path,
+                        "remote_dir": remote_dir or "",
                         "local_dir": str(local_dir),
                         "reason": "remote_folder_not_found",
                         "files": 0,
@@ -748,7 +781,8 @@ def run_download(
                         "fe_pla_aniomes": item.fe_pla_aniomes,
                         "dig_area_dep": item.dig_area_dep,
                         "remote_rel_path": item.remote_rel_path,
-                        "remote_dir": remote_dir,
+                        "resolved_rel_path": resolved_rel_path or item.remote_rel_path,
+                        "remote_dir": remote_dir or "",
                         "local_dir": str(local_dir),
                         "status_sftp": "MISSING",
                         "reason": "remote_folder_not_found",
@@ -759,7 +793,11 @@ def run_download(
                     missing_rows.append(row)
 
                     if log_cb:
-                        log_cb(f"FALTANTE: {item.dig_tramite} -> {remote_dir}")
+                        candidate_text = ", ".join(_item_relative_paths(item))
+                        log_cb(
+                            f"FALTANTE: {item.dig_tramite} -> {resolved_rel_path or item.remote_rel_path}"
+                            + (f" | candidatos: {candidate_text}" if candidate_text else "")
+                        )
 
             counters = {
                 "files_done": 0,
@@ -803,13 +841,6 @@ def run_download(
         _write_csv(audit_csv_path, audit_rows, csv_fieldnames)
         _write_csv(missing_csv_path, missing_rows, csv_fieldnames)
 
-        pdf_optimization = _compress_pdfs_recursive(data_root, log_cb=log_cb)
-        if log_cb and pdf_optimization["checked"]:
-            log_cb(
-                f"Ghostscript revisó {pdf_optimization['checked']} PDF(s), "
-                f"optimizó {pdf_optimization['optimized']}."
-            )
-
         expected_folders = len(items)
         found_folders = len(planned)
         missing_folders = len(missing)
@@ -836,7 +867,6 @@ def run_download(
             else 0,
             "total_files": files_total,
             "total_bytes": bytes_total,
-            "pdf_optimization": pdf_optimization,
             "downloaded": downloaded,
             "missing": missing,
             "job_root": str(job_root),
