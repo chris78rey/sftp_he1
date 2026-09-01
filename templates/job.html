@@ -6,7 +6,7 @@
 <div class="card">
   <p><b>Job:</b> {{ job.job_id_value }}</p>
   <p><b>Inicio:</b> {{ format_datetime_local(job.started_at or job.created_at) }}</p>
-  <p><b>Búsqueda:</b> {% if job.search_mode == 'dig_tramite' %}DIG_TRAMITE{% else %}DIG_ID_TRAMITE{% endif %} = {{ job.search_value or job.dig_id_tramite }}</p>
+  <p><b>Búsqueda:</b> {% if job.search_mode == 'dig_tramite' %}DIG_TRAMITE{% elif job.search_mode == 'label_objecion' %}LABEL_OBJECION{% else %}DIG_ID_TRAMITE{% endif %} = {{ job.search_value or job.dig_id_tramite }}</p>
   <p><b>Fuente:</b> {% if job.source_mode == 'local' %}Repositorio local{% else %}SFTP{% endif %}</p>
   <p><b>Estado:</b> {{ job.status }}</p>
   <p><b>Duración:</b> {{ duration_text(job) }}</p>

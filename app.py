@@ -180,6 +180,8 @@ def _safe_output_path(relative_path: str) -> Path:
 def _search_mode_label(mode: str | None) -> str:
     if (mode or "").strip() == "dig_tramite":
         return "DIG_TRAMITE"
+    if (mode or "").strip() == "label_objecion":
+        return "LABEL_OBJECION"
     return "DIG_ID_TRAMITE"
 
 
@@ -187,6 +189,18 @@ def _extract_search(form) -> tuple[str, str]:
     mode = (form.get("search_mode") or "dig_id_tramite").strip()
     value = (form.get("search_value") or form.get("dig_id_tramite") or "").strip()
     return mode, value
+
+
+def _validate_search_value(mode: str, value: str) -> bool:
+    if mode == "label_objecion":
+        return bool(value) and len(value) <= 60
+    return value.isdigit()
+
+
+def _search_value_error(mode: str) -> str:
+    if mode == "label_objecion":
+        return "LABEL_OBJECION debe tener un valor de hasta 60 caracteres."
+    return f"{_search_mode_label(mode)} debe ser numérico."
 
 
 def _extract_aniomes(form) -> str:
@@ -1256,8 +1270,8 @@ def job_download_validation_csv(job_id: str):
 def preview():
     search_mode, raw = _extract_search(request.form)
 
-    if not raw.isdigit():
-        flash(f"{_search_mode_label(search_mode)} debe ser numérico.", "error")
+    if not _validate_search_value(search_mode, raw):
+        flash(_search_value_error(search_mode), "error")
         return render_template(
             "index.html",
             defaults=Settings,
@@ -1297,8 +1311,8 @@ def start():
     if source_mode not in {"local", "sftp"}:
         source_mode = "local"
 
-    if not raw.isdigit():
-        flash(f"{_search_mode_label(search_mode)} debe ser numérico.", "error")
+    if not _validate_search_value(search_mode, raw):
+        flash(_search_value_error(search_mode), "error")
         return render_template(
             "index.html",
             defaults=Settings,

@@ -22,6 +22,7 @@ from oracle_client import (
     FolderItem,
     fetch_items_by_dig_id_tramite,
     fetch_items_by_dig_tramite,
+    fetch_items_by_label_objecion,
 )
 
 
@@ -519,6 +520,9 @@ def run_download(
     if mode == "dig_tramite":
         items = fetch_items_by_dig_tramite(value)
         search_label = "DIG_TRAMITE"
+    elif mode == "label_objecion":
+        items = fetch_items_by_label_objecion(value)
+        search_label = "LABEL_OBJECION"
     else:
         mode = "dig_id_tramite"
         items = fetch_items_by_dig_id_tramite(int(value))

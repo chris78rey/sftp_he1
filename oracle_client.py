@@ -11,7 +11,7 @@ from config import Settings
 
 @dataclass(frozen=True)
 class FolderItem:
-    dig_id_tramite: int
+    dig_id_tramite: int | None
     dig_tramite: str
     dig_anio: str
     dig_expediente: str
@@ -113,10 +113,18 @@ def connect_with_failover():
     raise RuntimeError(f"No se pudo conectar a Oracle. Último error: {last_exc}")
 
 
-def _fetch_items(where_clause: str, params: list[object]) -> list[FolderItem]:
+def _fetch_items(
+    where_clause: str,
+    params: list[object],
+    *,
+    allow_null_dig_id_tramite: bool = False,
+) -> list[FolderItem]:
     conn = connect_with_failover()
     try:
         cur = conn.cursor()
+        dig_id_tramite_filter = (
+            "" if allow_null_dig_id_tramite else "AND DIG_ID_TRAMITE IS NOT NULL"
+        )
         sql = f"""
             SELECT DISTINCT
                    DIG_ID_TRAMITE,
@@ -127,7 +135,7 @@ def _fetch_items(where_clause: str, params: list[object]) -> list[FolderItem]:
                    TRIM(NVL(DIG_AREA_DEP, '')) AS DIG_AREA_DEP
               FROM {Settings.ORACLE_OWNER}.{Settings.ORACLE_TABLE}
              WHERE {where_clause}
-               AND DIG_ID_TRAMITE IS NOT NULL
+               {dig_id_tramite_filter}
                AND DIG_TRAMITE IS NOT NULL
                AND (TRIM(DIG_ANIO) IS NOT NULL AND LENGTH(TRIM(DIG_ANIO)) > 0)
                AND (TRIM(DIG_EXPEDIENTE) IS NOT NULL AND LENGTH(TRIM(DIG_EXPEDIENTE)) > 0)
@@ -138,12 +146,12 @@ def _fetch_items(where_clause: str, params: list[object]) -> list[FolderItem]:
         out: list[FolderItem] = []
         for row in rows:
             if row[0] is None:
-                continue
-
-            try:
-                dig_id_tramite = int(str(row[0]).strip())
-            except Exception:
-                continue
+                dig_id_tramite = None
+            else:
+                try:
+                    dig_id_tramite = int(str(row[0]).strip())
+                except Exception:
+                    continue
 
             dig_anio = str(row[2]).strip()
             dig_expediente = str(row[3]).strip()
@@ -178,6 +186,17 @@ def fetch_items_by_dig_tramite(dig_tramite: str) -> list[FolderItem]:
     return _fetch_items("TRIM(DIG_TRAMITE) = ?", [value])
 
 
+def fetch_items_by_label_objecion(label_objecion: str) -> list[FolderItem]:
+    value = str(label_objecion).strip()
+    if not value:
+        return []
+    return _fetch_items(
+        "TRIM(LABEL_OBJECION) = ?",
+        [value],
+        allow_null_dig_id_tramite=True,
+    )
+
+
 def fetch_items_by_fe_pla_aniomes(fe_pla_aniomes: str) -> list[FolderItem]:
     value = str(fe_pla_aniomes).strip()
     if not value:
@@ -203,6 +222,8 @@ def build_preview(search_mode: str, raw_value: str | int) -> dict:
     value = str(raw_value).strip()
     if mode == "dig_tramite":
         items = fetch_items_by_dig_tramite(value)
+    elif mode == "label_objecion":
+        items = fetch_items_by_label_objecion(value)
     else:
         mode = "dig_id_tramite"
         items = fetch_items_by_dig_id_tramite(int(value))
