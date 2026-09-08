@@ -197,6 +197,104 @@ def fetch_items_by_label_objecion(label_objecion: str) -> list[FolderItem]:
     )
 
 
+def fetch_pending_objection_downloads() -> list[dict]:
+    """Return saved, not-yet-processed selective objection downloads."""
+    conn = connect_with_failover()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT d.ID_DESCARGA, d.LABEL_OBJECION, d.ESTADO, "
+            "d.TOTAL_PLANILLAS, d.TOTAL_PDFS, d.FECHA_SOLICITUD, "
+            "i.DIG_TRAMITE, i.GRUPO_OBJECION, i.NOMBRE_PDF "
+            "FROM DIGITALIZACION.CD_DESCARGA_OBJECION d "
+            "JOIN DIGITALIZACION.CD_DESCARGA_OBJECION_ITEM i "
+            "ON i.ID_DESCARGA = d.ID_DESCARGA "
+            "WHERE d.ESTADO IN ('PENDIENTE', 'ERROR') AND i.ESTADO = 'PENDIENTE' "
+            "ORDER BY d.FECHA_SOLICITUD DESC, i.DIG_TRAMITE, i.NOMBRE_PDF"
+        )
+        grouped: dict[str, dict] = {}
+        for row in cur.fetchall():
+            if not row or not row[0]:
+                continue
+            key = str(row[1] or "")
+            item = grouped.setdefault(key, {
+                "id_descarga": str(row[0]),
+                "label": str(row[1] or ""),
+                "estado": str(row[2] or ""),
+                "total_planillas": int(row[3] or 0),
+                "total_pdfs": int(row[4] or 0),
+                "fecha": str(row[5] or ""),
+                "items": [],
+                "request_ids": [],
+            })
+            if str(row[0]) not in item["request_ids"]:
+                item["request_ids"].append(str(row[0]))
+            item["items"].append({
+                "tramite": str(row[6] or ""),
+                "grupo": str(row[7] or "SIN_GRUPO"),
+                "pdf": str(row[8] or ""),
+            })
+        return list(grouped.values())
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def fetch_saved_objection_downloads(label_objecion: str) -> list[dict]:
+    """Read the current selected PDFs for one label, regardless of download status."""
+    label = str(label_objecion or "").strip()
+    if not label:
+        return []
+    conn = connect_with_failover()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT d.LABEL_OBJECION, i.DIG_TRAMITE, i.GRUPO_OBJECION, i.NOMBRE_PDF "
+            "FROM DIGITALIZACION.CD_DESCARGA_OBJECION d "
+            "JOIN DIGITALIZACION.CD_DESCARGA_OBJECION_ITEM i ON i.ID_DESCARGA=d.ID_DESCARGA "
+            "WHERE TRIM(d.LABEL_OBJECION)=TRIM(?) ORDER BY i.DIG_TRAMITE, i.NOMBRE_PDF",
+            (label,),
+        )
+        seen = set()
+        out = []
+        for row in cur.fetchall():
+            key = (str(row[1] or ""), str(row[2] or ""), str(row[3] or ""))
+            if not row[1] or not row[3] or key in seen:
+                continue
+            # A selection can outlive a PDF that was later removed from the repository.
+            # Only expose files that still exist in the current local SFTP mirror.
+            if not any(
+                path.is_file()
+                for path in Settings.LOCAL_REPO_ROOT.glob(
+                    f"*/*/{key[0]}/{Path(key[2]).name}"
+                )
+            ):
+                continue
+            seen.add(key)
+            out.append({"label": str(row[0] or label), "tramite": key[0], "grupo": key[1], "pdf": key[2]})
+        return out
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def fetch_saved_objection_planillas(label_objecion: str, page: int = 1, page_size: int = 50) -> tuple[list[dict], int]:
+    rows = fetch_saved_objection_downloads(label_objecion)
+    groups = {}
+    for row in rows:
+        key = (row["tramite"], row["grupo"])
+        groups.setdefault(key, {"tramite": key[0], "grupo": key[1], "pdfs": []})["pdfs"].append(row["pdf"])
+    ordered = sorted(groups.values(), key=lambda x: x["tramite"])
+    page = max(1, int(page or 1))
+    page_size = max(10, min(int(page_size or 50), 200))
+    start = (page - 1) * page_size
+    return ordered[start:start + page_size], len(ordered)
+
+
 def fetch_items_by_fe_pla_aniomes(fe_pla_aniomes: str) -> list[FolderItem]:
     value = str(fe_pla_aniomes).strip()
     if not value:

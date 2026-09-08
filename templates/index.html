@@ -20,16 +20,12 @@
             <input type="radio" name="search_mode" value="dig_tramite" {% if last_search_mode == 'dig_tramite' %}checked{% endif %} style="width:auto;">
             <span><b>Trámite</b></span>
           </label>
-          <label style="font-weight:normal; display:flex; gap:8px; align-items:center; margin:0;">
-            <input type="radio" name="search_mode" value="label_objecion" {% if last_search_mode == 'label_objecion' %}checked{% endif %} style="width:auto;">
-            <span><b>Etiqueta de objeción</b></span>
-          </label>
         </div>
       </div>
       <div>
         <label>Número o código</label>
         <input type="text" name="search_value" placeholder="Ejemplo: 16356 o 1212" value="{{ last_search_value or '' }}">
-        <div class="muted" style="margin-top:6px;">El valor se interpreta según la opción seleccionada: ID, trámite o `LABEL_OBJECION`.</div>
+        <div class="muted" style="margin-top:6px;">El valor se interpreta según la opción seleccionada: ID o trámite.</div>
       </div>
       <div><label>Oracle destino</label><input type="text" value="{{ defaults.ORACLE_TARGETS }}" readonly></div>
       <div><label>SFTP destino</label><input type="text" value="{{ defaults.SFTP_HOST }}:{{ defaults.SFTP_PORT }} | {{ defaults.SFTP_REMOTE_BASE }}" readonly></div>

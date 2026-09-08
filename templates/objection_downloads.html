@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>Descargas selectivas de objeciones</h1>
+<div class="card">
+  <p class="muted">Ingrese el label para consultar únicamente sus PDFs seleccionados.</p>
+  <form method="get" action="/objeciones/seleccionadas" style="display:flex;gap:10px;align-items:end;max-width:600px;">
+    <div style="flex:1;"><label>Label de objeción</label><input name="label" value="{{ label }}" placeholder="Ejemplo: 1234567" required></div>
+    <button type="submit">Buscar</button>
+  </form>
+  {% if label %}<p><a class="btn secondary" href="/objeciones/seleccionadas/exportar?label={{ label }}">Exportar selección a Excel</a></p>{% endif %}
+  {% if label and selected_planillas %}
+  <table>
+    <thead><tr><th>Planilla</th><th>Grupo</th><th>PDFs seleccionados</th><th>Detalle</th><th>Acción</th></tr></thead>
+    <tbody>
+      {% for selected in selected_planillas %}
+        <tr>
+          <td>{{ selected.tramite }}</td>
+          <td>{{ selected.grupo }}</td>
+          <td>{{ selected.pdfs|length }}</td>
+          <td><details><summary>Ver PDFs</summary>{% for pdf in selected.pdfs %}<div><code>{{ pdf }}</code></div>{% endfor %}</details></td>
+          {% if loop.first %}<td rowspan="{{ selected_planillas|length }}"><a class="btn" href="/objeciones/descargas/label/{{ label }}">Descargar ZIP selectivo</a></td>{% endif %}
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% set total_pages = (total_planillas + 49) // 50 %}
+  <p class="muted">Total: {{ total_planillas }} planillas. Página {{ page }} de {{ total_pages }}.</p>
+  <div class="actions">
+    {% if page > 1 %}<a class="btn secondary" href="/objeciones/seleccionadas?label={{ label }}&page={{ page - 1 }}">Anterior</a>{% endif %}
+    {% if page < total_pages %}<a class="btn" href="/objeciones/seleccionadas?label={{ label }}&page={{ page + 1 }}">Siguiente</a>{% endif %}
+  </div>
+  {% elif label %}
+  <p>No hay selecciones guardadas para descargar.</p>
+  {% endif %}
+</div>
+{% endblock %}

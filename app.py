@@ -12,6 +12,7 @@ import subprocess
 import threading
 import traceback
 import uuid
+import zipfile
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
 
@@ -38,7 +39,11 @@ from oracle_client import (
     build_preview,
     fetch_items_by_fe_pla_aniomes_and_area_dep,
     fetch_items_by_fe_pla_aniomes,
+    fetch_pending_objection_downloads,
+    fetch_saved_objection_downloads,
+    fetch_saved_objection_planillas,
     oracle_diagnostics,
+    connect_with_failover,
 )
 from sftp_download import sftp_diagnostics
 
@@ -1098,6 +1103,10 @@ def home():
 
     jobs.sort(key=lambda j: j.get("created_at") or "", reverse=True)
     active = next((j for j in jobs if j.get("status") in {"waiting", "running"}), None)
+    try:
+        objection_downloads = fetch_pending_objection_downloads()
+    except Exception:
+        objection_downloads = []
 
     return render_template(
         "index.html",
@@ -1110,7 +1119,47 @@ def home():
         active_job=active,
         duration_text=_duration_text,
         format_datetime_local=_format_datetime_local,
+        objection_downloads=objection_downloads,
     )
+
+
+@app.get("/objeciones/seleccionadas")
+@login_required
+def objection_selected_downloads():
+    label = str(request.args.get("label") or "").strip()
+    page = max(1, int(request.args.get("page") or 1))
+    try:
+        selected_planillas, total_planillas = fetch_saved_objection_planillas(label, page=page) if label else ([], 0)
+    except Exception:
+        objection_downloads = []
+    return render_template(
+        "objection_downloads.html",
+        selected_planillas=selected_planillas,
+        total_planillas=total_planillas,
+        page=page,
+        label=label,
+        username=session.get("username"),
+    )
+
+
+@app.get("/objeciones/seleccionadas/exportar")
+@login_required
+def objection_selected_export():
+    label = str(request.args.get("label") or "").strip()
+    if not label:
+        abort(400)
+    rows = fetch_saved_objection_downloads(label)
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(["LABEL", "GRUPO", "PLANILLA", "PDF", "CANTIDAD_PDFS_PLANILLA"])
+    counts = {}
+    for row in rows:
+        key = (row["grupo"], row["tramite"])
+        counts[key] = counts.get(key, 0) + 1
+    for row in rows:
+        writer.writerow([row["label"], row["grupo"], row["tramite"], row["pdf"], counts[(row["grupo"], row["tramite"])]] )
+    data = io.BytesIO(output.getvalue().encode("utf-8-sig"))
+    return send_file(data, as_attachment=True, download_name=f"seleccion_objeciones_{label}.csv", mimetype="text/csv")
 
 
 @app.get("/admin")
@@ -1379,6 +1428,123 @@ def job_download(job_id: str):
         download_name=zip_path.name,
         mimetype="application/zip",
     )
+
+
+def _disable_oracle_autocommit(conn) -> None:
+    jconn = getattr(conn, "jconn", None)
+    if jconn is not None:
+        try:
+            jconn.setAutoCommit(False)
+            return
+        except Exception:
+            pass
+    try:
+        conn.autocommit = False
+    except Exception:
+        pass
+
+
+@app.get("/objeciones/descargas/<download_id>")
+@login_required
+def objection_download(download_id: str):
+    """Generate and download the selected objection PDFs from the Oracle request."""
+    if not re.fullmatch(r"[A-Fa-f0-9]{16,64}", str(download_id or "")):
+        abort(404)
+    conn = connect_with_failover()
+    try:
+        _disable_oracle_autocommit(conn)
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT LABEL_OBJECION FROM DIGITALIZACION.CD_DESCARGA_OBJECION "
+            "WHERE ID_DESCARGA = ?",
+            (download_id,),
+        )
+        request_row = cur.fetchone()
+        if not request_row:
+            abort(404)
+        label = str(request_row[0] or "").strip()
+        zip_label = re.sub(r"[^A-Za-z0-9._-]+", "_", label).strip("._") or "OBJECIONES"
+        cur.execute(
+            "SELECT i.DIG_TRAMITE, i.NOMBRE_PDF, i.ID_DESCARGA, d.FECHA_SOLICITUD "
+            "FROM DIGITALIZACION.CD_DESCARGA_OBJECION_ITEM i "
+            "JOIN DIGITALIZACION.CD_DESCARGA_OBJECION d ON d.ID_DESCARGA = i.ID_DESCARGA "
+            "WHERE TRIM(d.LABEL_OBJECION) = TRIM(?) "
+            "ORDER BY i.DIG_TRAMITE, d.FECHA_SOLICITUD DESC, i.NOMBRE_PDF",
+            (label,),
+        )
+        raw_items = cur.fetchall()
+        latest_request: dict[str, str] = {}
+        for row in raw_items:
+            if row[0] and row[2] and str(row[0]).strip() not in latest_request:
+                latest_request[str(row[0]).strip()] = str(row[2]).strip()
+        current_ids = set(latest_request.values())
+        items = [
+            (str(row[0]).strip(), str(row[1]).strip())
+            for row in raw_items
+            if row[0] and row[1] and str(row[2]).strip() in current_ids
+        ]
+        request_ids = sorted(current_ids)
+        if not items:
+            abort(404)
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+    output_dir = (Settings.DOWNLOAD_OUTPUT_ROOT / "objeciones" / download_id).resolve()
+    output_dir.mkdir(parents=True, exist_ok=True)
+    zip_path = output_dir / f"{zip_label}_{download_id[:12]}.zip"
+    try:
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for tramite, pdf_name in items:
+                if Path(pdf_name).name != pdf_name or Path(pdf_name).suffix.lower() != ".pdf":
+                    raise ValueError(f"Nombre de PDF inválido: {pdf_name}")
+                source = None
+                for year_dir in Settings.LOCAL_REPO_ROOT.iterdir():
+                    if not year_dir.is_dir():
+                        continue
+                    for exp_dir in year_dir.iterdir():
+                        candidate = exp_dir / tramite / pdf_name
+                        if candidate.is_file():
+                            source = candidate.resolve()
+                            break
+                    if source:
+                        break
+                if source is None or Settings.LOCAL_REPO_ROOT not in source.parents:
+                    raise FileNotFoundError(f"No se encontró {tramite}/{pdf_name}")
+                archive.write(source, f"{zip_label}/{tramite}/{pdf_name}")
+        conn = connect_with_failover()
+        try:
+            _disable_oracle_autocommit(conn)
+            cur = conn.cursor()
+        finally:
+            conn.close()
+    except Exception as exc:
+        abort(404)
+    return send_file(str(zip_path), as_attachment=True, download_name=zip_path.name, mimetype="application/zip")
+
+
+@app.get("/objeciones/descargas/label/<path:label>")
+@login_required
+def objection_download_by_label(label: str):
+    rows = fetch_saved_objection_downloads(label)
+    if not rows:
+        abort(404)
+    conn = connect_with_failover()
+    try:
+        cur = conn.cursor()
+        cur.execute(
+            "SELECT ID_DESCARGA FROM DIGITALIZACION.CD_DESCARGA_OBJECION "
+            "WHERE TRIM(LABEL_OBJECION)=TRIM(?) ORDER BY FECHA_SOLICITUD DESC",
+            (label,),
+        )
+        row = cur.fetchone()
+    finally:
+        conn.close()
+    if not row or not row[0]:
+        abort(404)
+    return objection_download(str(row[0]))
 
 
 # === NUEVO: descarga del CSV de auditoría ===
