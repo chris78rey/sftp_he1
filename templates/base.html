@@ -9,7 +9,7 @@
     body { font-family: Arial, sans-serif; background:#f6f8fb; margin:0; color:#0f172a; }
     .nav { background:#0f172a; color:#e2e8f0; }
     .nav .inner { max-width:1280px; margin:0 auto; padding:10px 16px; display:flex; gap:16px; align-items:center; }
-    .nav a { color:#e2e8f0; text-decoration:none; padding:6px 10px; border-radius:6px; }
+    .nav a { color:#e2e8f0; text-decoration:none; padding:6px 10px; border-radius:6px; text-transform:uppercase; }
     .nav a:hover { background:rgba(255,255,255,0.08); }
     .wrap { max-width:1280px; margin:20px auto; padding:0 16px; }
     .card { background:#fff; border:1px solid #dbe3ef; border-radius:12px; padding:18px; margin-bottom:16px; }
@@ -36,16 +36,16 @@
 <body>
 <div class="nav"><div class="inner topbar">
   <div style="display:flex; gap:12px; align-items:center;">
-    <a href="/">Inicio</a>
-    <a href="/objeciones/seleccionadas">Objeciones</a>
+    <a href="/">INICIO</a>
+    <a href="/objeciones/seleccionadas">OBJECIONES</a>
     <a href="/sync-candidates">HOSPITALIZACION CASOS</a>
     <a href="/urgencias-casos">URGENCIAS CASOS</a>
     <a href="/path-validation">VALIDACION RUTAS</a>
-    <a href="/diagnostics">Diagnóstico</a>
-    <a href="/admin">Admin</a>
+    <a href="/diagnostics">DIAGNÓSTICO</a>
+    <a href="/admin">ADMIN</a>
   </div>
   <div style="display:flex; gap:10px; align-items:center;">
-    {% if session.get("username") %}<span class="pill">{{ session.get("username") }}</span><a href="/logout">Salir</a>{% endif %}
+    {% if session.get("username") %}<span class="pill">{{ session.get("username") }}</span><a href="/logout">SALIR</a>{% endif %}
   </div>
 </div></div>
 <div class="wrap">{% block content %}{% endblock %}</div>
