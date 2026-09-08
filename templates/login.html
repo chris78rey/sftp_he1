@@ -1,7 +1,9 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="card" style="max-width:420px;margin:40px auto;">
-  <h1>Ingreso</h1>
+<div class="login-page">
+<div class="card login-card">
+  <h1>Bienvenido</h1>
+  <p class="subtitle">Ingresa a SFTP HE1 para continuar.</p>
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
       {% for category, message in messages %}<p class="{{ 'error' if category == 'error' else 'flash-ok' }}">{{ message }}</p>{% endfor %}
@@ -9,14 +11,15 @@
   {% endwith %}
   <form method="post">
     <div style="margin-bottom:14px;">
-      <label>Usuario</label>
-      <input type="text" name="username" placeholder="Leticia" autofocus>
+      <label for="username">Usuario</label>
+      <input id="username" type="text" name="username" placeholder="Ingresa tu usuario" autocomplete="username" required autofocus>
     </div>
     <div style="margin-bottom:14px;">
-      <label>Clave</label>
-      <input type="password" name="password" placeholder="Clave de acceso">
+      <label for="password">Clave</label>
+      <input id="password" type="password" name="password" placeholder="Ingresa tu clave" autocomplete="current-password" required>
     </div>
     <button type="submit">Entrar</button>
   </form>
+</div>
 </div>
 {% endblock %}

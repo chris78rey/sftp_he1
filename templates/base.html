@@ -6,16 +6,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   {% if auto_refresh %}<meta http-equiv="refresh" content="4">{% endif %}
   <style>
-    body { font-family: Arial, sans-serif; background:#f6f8fb; margin:0; color:#0f172a; }
-    .nav { background:#0f172a; color:#e2e8f0; }
+    :root { color-scheme:light; --ink:#0f172a; --muted:#64748b; --line:#dbe3ef; --brand:#0f766e; --nav:#0f172a; }
+    * { box-sizing:border-box; }
+    body { font-family:Arial,sans-serif; background:#f6f8fb; margin:0; color:var(--ink); }
+    .nav { background:var(--nav); color:#e2e8f0; }
     .nav .inner { max-width:1280px; margin:0 auto; padding:10px 16px; display:flex; gap:16px; align-items:center; }
     .nav a { color:#e2e8f0; text-decoration:none; padding:6px 10px; border-radius:6px; text-transform:uppercase; }
     .nav a:hover { background:rgba(255,255,255,0.08); }
     .wrap { max-width:1280px; margin:20px auto; padding:0 16px; }
+    .brand { color:#fff; font-weight:700; letter-spacing:.04em; margin-right:8px; white-space:nowrap; }
     .card { background:#fff; border:1px solid #dbe3ef; border-radius:12px; padding:18px; margin-bottom:16px; }
     .grid { display:grid; grid-template-columns:repeat(3, minmax(0,1fr)); gap:14px; }
     label { display:block; font-weight:bold; margin-bottom:6px; }
-    input, select { width:100%; box-sizing:border-box; padding:10px; border:1px solid #cbd5e1; border-radius:8px; background:#fff; }
+    input, select { width:100%; padding:10px 12px; border:1px solid #cbd5e1; border-radius:8px; background:#fff; font:inherit; }
+    input:focus, select:focus { outline:3px solid rgba(15,118,110,.18); border-color:var(--brand); }
     .actions { display:flex; gap:12px; margin-top:18px; }
     button, a.btn { background:#0f766e; color:#fff; border:0; padding:10px 14px; border-radius:8px; text-decoration:none; cursor:pointer; display:inline-block; }
     button.secondary, a.secondary { background:#334155; }
@@ -31,11 +35,19 @@
     .topbar { display:flex; justify-content:space-between; align-items:center; gap:12px; width:100%; }
     .pill { padding:4px 10px; border-radius:999px; background:#1e293b; color:#e2e8f0; font-size:12px; }
     .flash-ok { color:#166534; }
+    .login-page { min-height:calc(100vh - 40px); display:grid; place-items:center; padding:24px 0; }
+    .login-card { width:min(100%,420px); margin:0; padding:32px; box-shadow:0 16px 40px rgba(15,23,42,.08); }
+    .login-card h1 { margin:0 0 8px; font-size:28px; }
+    .login-card .subtitle { margin:0 0 26px; color:var(--muted); }
+    .login-card button { width:100%; margin-top:8px; font-weight:700; }
+    @media (max-width:760px) { .nav .inner { flex-wrap:wrap; gap:8px; } .nav .inner > div:first-child { overflow:auto; width:100%; } .nav a { padding:6px 7px; font-size:12px; } .grid { grid-template-columns:1fr; } .wrap { margin-top:12px; } }
   </style>
 </head>
 <body>
+{% if session.get("is_authenticated") %}
 <div class="nav"><div class="inner topbar">
   <div style="display:flex; gap:12px; align-items:center;">
+    <span class="brand">SFTP HE1</span>
     <a href="/">INICIO</a>
     <a href="/objeciones/seleccionadas">OBJECIONES</a>
     <a href="/sync-candidates">HOSPITALIZACION CASOS</a>
@@ -48,6 +60,7 @@
     {% if session.get("username") %}<span class="pill">{{ session.get("username") }}</span><a href="/logout">SALIR</a>{% endif %}
   </div>
 </div></div>
+{% endif %}
 <div class="wrap">{% block content %}{% endblock %}</div>
 </body>
 </html>
