@@ -140,17 +140,16 @@ def _resolve_local_source_dir(root: Path, item: FolderItem) -> tuple[Path | None
         return None, (rel_candidates[0] if rel_candidates else ""), rel_candidates
 
     tramite = _safe_name(item.dig_tramite)
-    expediente_variants = _item_expediente_variants(item)
     matches: list[Path] = []
 
     try:
-        for found in year_root.rglob(tramite):
-            if not found.is_dir():
+        # La estructura válida es año/expediente/trámite; no escanear todos
+        # los archivos recursivamente porque el repositorio puede ser grande.
+        for expediente_root in year_root.iterdir():
+            if not expediente_root.is_dir():
                 continue
-            parent_name = found.parent.name.strip()
-            if parent_name in expediente_variants or any(
-                parent_name.startswith(exp) for exp in expediente_variants
-            ):
+            found = expediente_root / tramite
+            if found.is_dir():
                 resolved = found.resolve()
                 if resolved not in matches:
                     matches.append(resolved)
@@ -162,16 +161,8 @@ def _resolve_local_source_dir(root: Path, item: FolderItem) -> tuple[Path | None
         return chosen, str(chosen.relative_to(root).as_posix()), rel_candidates
 
     if len(matches) > 1:
-        def _match_key(path: Path) -> tuple[int, str]:
-            parent_name = path.parent.name.strip()
-            try:
-                exp_idx = expediente_variants.index(parent_name)
-            except ValueError:
-                exp_idx = len(expediente_variants)
-            return exp_idx, str(path)
-
-        chosen = sorted(matches, key=_match_key)[0]
-        return chosen, str(chosen.relative_to(root).as_posix()), rel_candidates
+        # No elegir silenciosamente una ruta si el trámite aparece duplicado.
+        return None, (rel_candidates[0] if rel_candidates else ""), rel_candidates
 
     return None, (rel_candidates[0] if rel_candidates else ""), rel_candidates
 

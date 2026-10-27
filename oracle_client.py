@@ -17,6 +17,7 @@ class FolderItem:
     dig_expediente: str
     fe_pla_aniomes: str
     dig_area_dep: str
+    dig_path_repo: str
     remote_rel_path: str
 
     def to_dict(self) -> dict:
@@ -125,6 +126,9 @@ def _fetch_items(
         dig_id_tramite_filter = (
             "" if allow_null_dig_id_tramite else "AND DIG_ID_TRAMITE IS NOT NULL"
         )
+        dig_planillado_filter = (
+            "" if allow_null_dig_id_tramite else "AND DIG_PLANILLADO = 'S'"
+        )
         sql = f"""
             SELECT DISTINCT
                    DIG_ID_TRAMITE,
@@ -132,10 +136,12 @@ def _fetch_items(
                    TRIM(NVL(DIG_ANIO, '')) AS DIG_ANIO,
                    TRIM(NVL(DIG_EXPEDIENTE, '')) AS DIG_EXPEDIENTE,
                    TRIM(NVL(FE_PLA_ANIOMES, '')) AS FE_PLA_ANIOMES,
-                   TRIM(NVL(DIG_AREA_DEP, '')) AS DIG_AREA_DEP
+                   TRIM(NVL(DIG_AREA_DEP, '')) AS DIG_AREA_DEP,
+                   TRIM(NVL(DIG_PATH_REPO, '')) AS DIG_PATH_REPO
               FROM {Settings.ORACLE_OWNER}.{Settings.ORACLE_TABLE}
              WHERE {where_clause}
                {dig_id_tramite_filter}
+               {dig_planillado_filter}
                AND DIG_TRAMITE IS NOT NULL
                AND (TRIM(DIG_ANIO) IS NOT NULL AND LENGTH(TRIM(DIG_ANIO)) > 0)
                AND (TRIM(DIG_EXPEDIENTE) IS NOT NULL AND LENGTH(TRIM(DIG_EXPEDIENTE)) > 0)
@@ -164,6 +170,7 @@ def _fetch_items(
                     dig_expediente=dig_expediente,
                     fe_pla_aniomes=str(row[4]).strip(),
                     dig_area_dep=str(row[5]).strip(),
+                    dig_path_repo=str(row[6]).strip(),
                     remote_rel_path=f"{dig_anio}/{dig_expediente}/{dig_tramite}",
                 )
             )
