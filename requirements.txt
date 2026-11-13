@@ -4,3 +4,4 @@ paramiko>=3.4,<4
 jaydebeapi>=1.2,<2
 JPype1>=1.5,<2
 gunicorn>=22,<24
+pypdf==5.1.0
