@@ -45,6 +45,15 @@ from oracle_client import (
     oracle_diagnostics,
     connect_with_failover,
 )
+from objection_merge import merge_pdfs, plan_merges
+from objection_report import (
+    build_label_overview,
+    build_reports,
+    disk_pdf_counts,
+    fetch_label_planillas,
+    fetch_labels_overview,
+    overview_csv,
+)
 from sftp_download import sftp_diagnostics
 
 app = Flask(__name__)
@@ -1132,12 +1141,21 @@ def objection_selected_downloads():
         selected_planillas, total_planillas = fetch_saved_objection_planillas(label, page=page) if label else ([], 0)
     except Exception:
         objection_downloads = []
+    # Resumen del label para aclarar que el ZIP trae más planillas que esta lista:
+    # esta lista solo cuenta las que tienen PDFs seleccionados.
+    label_summary = None
+    if label:
+        try:
+            label_summary = next((l for l in fetch_labels_overview() if l["label"] == label), None)
+        except Exception:
+            app.logger.warning("No se pudo obtener el resumen del label %s", label, exc_info=True)
     return render_template(
         "objection_downloads.html",
         selected_planillas=selected_planillas,
         total_planillas=total_planillas,
         page=page,
         label=label,
+        label_summary=label_summary,
         username=session.get("username"),
     )
 
@@ -1151,13 +1169,20 @@ def objection_selected_export():
     rows = fetch_saved_objection_downloads(label)
     output = io.StringIO()
     writer = csv.writer(output)
-    writer.writerow(["LABEL", "GRUPO", "PLANILLA", "PDF", "CANTIDAD_PDFS_PLANILLA"])
+    writer.writerow(["LABEL", "GRUPO", "PLANILLA", "PDF", "DISPONIBLE_EN_ESPEJO_LOCAL", "CANTIDAD_PDFS_PLANILLA"])
     counts = {}
     for row in rows:
         key = (row["grupo"], row["tramite"])
         counts[key] = counts.get(key, 0) + 1
     for row in rows:
-        writer.writerow([row["label"], row["grupo"], row["tramite"], row["pdf"], counts[(row["grupo"], row["tramite"])]] )
+        writer.writerow([
+            row["label"],
+            row["grupo"],
+            row["tramite"],
+            row["pdf"],
+            "SI" if row["disponible"] else "NO",
+            counts[(row["grupo"], row["tramite"])],
+        ])
     data = io.BytesIO(output.getvalue().encode("utf-8-sig"))
     return send_file(data, as_attachment=True, download_name=f"seleccion_objeciones_{label}.csv", mimetype="text/csv")
 
@@ -1444,6 +1469,57 @@ def _disable_oracle_autocommit(conn) -> None:
         pass
 
 
+@app.get("/objeciones/pendientes")
+@login_required
+def objection_pending_report():
+    """Reporte de planillas pendientes y sin selección guardada (solo lectura)."""
+    label = str(request.args.get("label") or "").strip()[:60]
+    filtro = str(request.args.get("filtro") or "sin_seleccion").strip()
+    labels = None
+    overview = None
+    error = ""
+    try:
+        if label:
+            overview = build_label_overview(label, filtro)
+            if not overview["total"]:
+                overview = None  # label sin planillas objetadas: muestra el aviso
+        else:
+            labels = fetch_labels_overview()
+    except Exception:
+        app.logger.exception("Reporte de objeciones pendientes fallido (label=%s)", label)
+        error = "No se pudo consultar Oracle. Intente de nuevo en unos minutos."
+    return render_template(
+        "objection_pending.html",
+        label=label,
+        labels=labels,
+        overview=overview,
+        error=error,
+        username=session.get("username"),
+    )
+
+
+@app.get("/objeciones/pendientes/exportar")
+@login_required
+def objection_pending_export():
+    label = str(request.args.get("label") or "").strip()[:60]
+    filtro = str(request.args.get("filtro") or "sin_seleccion").strip()
+    if not label:
+        abort(400)
+    try:
+        overview = build_label_overview(label, filtro)
+    except Exception:
+        app.logger.exception("Exportación de pendientes fallida (label=%s)", label)
+        abort(502)
+    safe = re.sub(r"[^A-Za-z0-9._-]+", "_", label).strip("._") or "label"
+    data = io.BytesIO(overview_csv(overview).encode("utf-8"))
+    return send_file(
+        data,
+        as_attachment=True,
+        download_name=f"objeciones_{safe}_{overview['filtro']}.csv",
+        mimetype="text/csv",
+    )
+
+
 @app.get("/objeciones/descargas/<download_id>")
 @login_required
 def objection_download(download_id: str):
@@ -1496,24 +1572,100 @@ def objection_download(download_id: str):
     output_dir.mkdir(parents=True, exist_ok=True)
     zip_path = output_dir / f"{zip_label}_{download_id[:12]}.zip"
     try:
-        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
-            for tramite, pdf_name in items:
-                if Path(pdf_name).name != pdf_name or Path(pdf_name).suffix.lower() != ".pdf":
-                    raise ValueError(f"Nombre de PDF inválido: {pdf_name}")
-                source = None
-                for year_dir in Settings.LOCAL_REPO_ROOT.iterdir():
-                    if not year_dir.is_dir():
-                        continue
-                    for exp_dir in year_dir.iterdir():
-                        candidate = exp_dir / tramite / pdf_name
-                        if candidate.is_file():
-                            source = candidate.resolve()
-                            break
-                    if source:
+        resolved: list[tuple[str, str, Path]] = []
+        for tramite, pdf_name in items:
+            if Path(pdf_name).name != pdf_name or Path(pdf_name).suffix.lower() != ".pdf":
+                raise ValueError(f"Nombre de PDF inválido: {pdf_name}")
+            source = None
+            for year_dir in Settings.LOCAL_REPO_ROOT.iterdir():
+                if not year_dir.is_dir():
+                    continue
+                for exp_dir in year_dir.iterdir():
+                    candidate = exp_dir / tramite / pdf_name
+                    if candidate.is_file():
+                        source = candidate.resolve()
                         break
-                if source is None or Settings.LOCAL_REPO_ROOT not in source.parents:
-                    raise FileNotFoundError(f"No se encontró {tramite}/{pdf_name}")
+                if source:
+                    break
+            if source is None or Settings.LOCAL_REPO_ROOT not in source.parents:
+                raise FileNotFoundError(f"No se encontró {tramite}/{pdf_name}")
+            resolved.append((tramite, pdf_name, source))
+        # Como Rust: si Oracle marca fragmentos (ORS_0) junto con su canónico (ORS),
+        # el ZIP lleva un solo PDF fundido. Solo lectura: no toca disco ni Oracle.
+        merge_groups_plan, consumed = plan_merges(resolved)
+        merge_notes: list[str] = []
+        with zipfile.ZipFile(zip_path, "w", compression=zipfile.ZIP_DEFLATED) as archive:
+            for tramite, pdf_name, source in resolved:
+                if (tramite, pdf_name) in consumed:
+                    continue
                 archive.write(source, f"{zip_label}/{tramite}/{pdf_name}")
+            for group in merge_groups_plan:
+                origin = " + ".join(group["members"])
+                try:
+                    merged_bytes, merged_pages = merge_pdfs(group["paths"])
+                except Exception as merge_exc:  # se conservan los originales
+                    app.logger.warning(
+                        "Fusión de objeciones fallida %s/%s (%s): %s",
+                        group["tramite"], group["output_name"], origin, merge_exc,
+                    )
+                    for member, member_path in zip(group["members"], group["paths"]):
+                        archive.write(member_path, f"{zip_label}/{group['tramite']}/{member}")
+                    merge_notes.append(
+                        f"{group['tramite']}/{group['output_name']} <- {origin}: "
+                        f"FUSION FALLIDA ({type(merge_exc).__name__}); se incluyen los originales"
+                    )
+                    continue
+                archive.writestr(
+                    f"{zip_label}/{group['tramite']}/{group['output_name']}", merged_bytes
+                )
+                merge_notes.append(
+                    f"{group['tramite']}/{group['output_name']} <- {origin}: "
+                    f"{merged_pages} paginas"
+                )
+            if merge_notes:
+                archive.writestr(
+                    f"{zip_label}/_FUSIONES.txt",
+                    ("﻿" + "\n".join(merge_notes) + "\n").encode("utf-8"),
+                )
+            # Planillas del label sin selección guardada: bajan como carpeta vacía y el
+            # informe explica el motivo. Solo lectura (SELECT y listado de carpetas).
+            try:
+                selected_by_tramite: dict[str, int] = {}
+                written_by_tramite: dict[str, int] = {}
+                for tramite, pdf_name, _source in resolved:
+                    selected_by_tramite[tramite] = selected_by_tramite.get(tramite, 0) + 1
+                    if (tramite, pdf_name) not in consumed:
+                        written_by_tramite[tramite] = written_by_tramite.get(tramite, 0) + 1
+                for group in merge_groups_plan:
+                    written_by_tramite[group["tramite"]] = written_by_tramite.get(group["tramite"], 0) + 1
+                label_planillas = fetch_label_planillas(label)
+                disk_counts = disk_pdf_counts(
+                    Settings.LOCAL_REPO_ROOT, {p["tramite"] for p in label_planillas}
+                )
+                report = build_reports(
+                    label, label_planillas, selected_by_tramite, written_by_tramite, disk_counts
+                )
+                for row in report["empty"]:
+                    folder_info = zipfile.ZipInfo(
+                        f"{zip_label}/{row['tramite']}/", datetime.now().timetuple()[:6]
+                    )
+                    folder_info.external_attr = (0o40755 << 16) | 0x10
+                    archive.writestr(folder_info, b"")
+                archive.writestr(
+                    f"{zip_label}/_CARPETAS_VACIAS.txt", report["txt"].encode("utf-8-sig")
+                )
+                archive.writestr(
+                    f"{zip_label}/_RESUMEN_PLANILLAS.csv", report["csv"].encode("utf-8")
+                )
+            except Exception as report_exc:  # el ZIP de PDFs sigue siendo válido
+                app.logger.warning("Informe de carpetas vacías fallido (%s): %s", label, report_exc)
+                archive.writestr(
+                    f"{zip_label}/_AVISO_REPORTE.txt",
+                    (
+                        "No se pudo generar el informe de carpetas vacias (error consultando Oracle "
+                        "o el disco). Los PDFs seleccionados si estan incluidos.\r\n"
+                    ).encode("utf-8-sig"),
+                )
         conn = connect_with_failover()
         try:
             _disable_oracle_autocommit(conn)

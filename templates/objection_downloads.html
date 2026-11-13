@@ -16,15 +16,31 @@
         <tr>
           <td>{{ selected.tramite }}</td>
           <td>{{ selected.grupo }}</td>
-          <td>{{ selected.pdfs|length }}</td>
-          <td><details><summary>Ver PDFs</summary>{% for pdf in selected.pdfs %}<div><code>{{ pdf }}</code></div>{% endfor %}</details></td>
+          <td>{{ selected.pdfs|length }}<br><small>{{ selected.pdfs_disponibles }} disponibles · {{ selected.pdfs|length - selected.pdfs_disponibles }} no disponibles localmente</small></td>
+          <td><details><summary>Ver PDFs</summary>{% for pdf in selected.pdfs %}<div><code>{{ pdf.nombre }}</code> — {% if pdf.disponible %}Disponible{% else %}No está en el espejo local{% endif %}</div>{% endfor %}</details></td>
           {% if loop.first %}<td rowspan="{{ selected_planillas|length }}"><a class="btn" href="/objeciones/descargas/label/{{ label }}">Descargar ZIP selectivo</a></td>{% endif %}
         </tr>
       {% endfor %}
     </tbody>
   </table>
   {% set total_pages = (total_planillas + 49) // 50 %}
-  <p class="muted">Total: {{ total_planillas }} planillas. Página {{ page }} de {{ total_pages }}.</p>
+  <p class="muted">Total: {{ total_planillas }} planillas con PDFs seleccionados (las de esta lista). Página {{ page }} de {{ total_pages }}.</p>
+  {% if label_summary %}
+  {% set vacias = label_summary.sin_seleccion %}
+  {% set resueltas_vacias = vacias - label_summary.pendientes_sin_seleccion %}
+  <div style="border:1px solid {% if vacias %}#f59e0b{% else %}#dbe3ef{% endif %};background:{% if vacias %}#fffbeb{% else %}#f8fafc{% endif %};border-radius:10px;padding:10px 14px;margin:10px 0;">
+    <b>El ZIP selectivo incluye las {{ label_summary.total }} planillas del label {{ label }}:</b>
+    {{ label_summary.total - vacias }} con los PDFs seleccionados (esta lista)
+    {% if vacias %}
+      y <b>{{ vacias }} sin selección que bajan con carpeta vacía</b>
+      ({{ label_summary.pendientes_sin_seleccion }} pendientes{% if resueltas_vacias %} y {{ resueltas_vacias }} resueltas, estas últimas conviene revisarlas{% endif %};
+      el motivo va en <code>_CARPETAS_VACIAS.txt</code> dentro del ZIP).
+      <a href="/objeciones/pendientes?label={{ label }}&filtro=sin_seleccion">Ver cuáles son</a>
+    {% else %}
+      y ninguna sin selección: todas bajan con PDFs.
+    {% endif %}
+  </div>
+  {% endif %}
   <div class="actions">
     {% if page > 1 %}<a class="btn secondary" href="/objeciones/seleccionadas?label={{ label }}&page={{ page - 1 }}">Anterior</a>{% endif %}
     {% if page < total_pages %}<a class="btn" href="/objeciones/seleccionadas?label={{ label }}&page={{ page + 1 }}">Siguiente</a>{% endif %}

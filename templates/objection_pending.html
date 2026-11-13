@@ -1,0 +1,119 @@
+{% extends "base.html" %}
+{% block content %}
+<style>
+  .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(190px,1fr)); gap:12px; margin:14px 0; }
+  .kpi { border:1px solid #dbe3ef; border-radius:10px; padding:12px 14px; background:#fff; }
+  .kpi b { display:block; font-size:26px; line-height:1.1; }
+  .kpi.alert { border-color:#f59e0b; background:#fffbeb; }
+  .kpi.alert b { color:#b45309; }
+  .badge { display:inline-block; padding:2px 9px; border-radius:999px; font-size:12px; font-weight:700; white-space:nowrap; }
+  .b-ps { background:#fef3c7; color:#92400e; }
+  .b-pc { background:#dbeafe; color:#1e40af; }
+  .b-rs { background:#fee2e2; color:#991b1b; }
+  .b-r  { background:#dcfce7; color:#166534; }
+  .num-alert { color:#b45309; font-weight:700; }
+  .filters a { margin-right:8px; }
+  .filters a.on { background:#0f766e; }
+  .scroll { overflow-x:auto; }
+</style>
+<h1>Objeciones: planillas pendientes y sin selección</h1>
+<div class="card">
+  <p class="muted">Detecta las planillas de un label que siguen pendientes y no tienen ningún PDF seleccionado. Esas planillas bajan con <b>carpeta vacía</b> en el ZIP selectivo.</p>
+  <form method="get" action="/objeciones/pendientes" style="display:flex;gap:10px;align-items:end;max-width:600px;">
+    <div style="flex:1;"><label>Label de objeción</label><input name="label" value="{{ label }}" placeholder="Ejemplo: 161363" maxlength="60"></div>
+    <button type="submit">Ver detalle</button>
+  </form>
+</div>
+
+{% if error %}<div class="card"><p class="error">{{ error }}</p></div>{% endif %}
+
+{% if not label and labels is not none %}
+<div class="card">
+  <h2 style="margin-top:0;">Labels con objeciones</h2>
+  {% if labels %}
+  <table>
+    <thead><tr><th>Label</th><th>Planillas</th><th>Pendientes</th><th>Pendientes sin selección</th><th></th></tr></thead>
+    <tbody>
+      {% for l in labels %}
+      <tr>
+        <td><b>{{ l.label }}</b></td>
+        <td>{{ l.total }}</td>
+        <td>{{ l.pendientes }}</td>
+        <td>{% if l.pendientes_sin_seleccion %}<span class="num-alert">{{ l.pendientes_sin_seleccion }}</span>{% else %}0{% endif %}</td>
+        <td><a class="btn{% if not l.pendientes_sin_seleccion %} secondary{% endif %}" href="/objeciones/pendientes?label={{ l.label }}">Ver detalle</a></td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>No hay labels con objeciones.</p>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if label and overview %}
+{% set c = overview.counts %}
+<div class="kpis">
+  <div class="kpi"><b>{{ overview.total }}</b>Planillas del label {{ label }}</div>
+  <div class="kpi {% if c.PENDIENTE_SIN_SELECCION %}alert{% endif %}"><b>{{ c.PENDIENTE_SIN_SELECCION }}</b>Pendientes sin selección<br><small class="muted">bajan con carpeta vacía</small></div>
+  <div class="kpi"><b>{{ c.PENDIENTE_CON_SELECCION }}</b>Pendientes con selección</div>
+  <div class="kpi"><b>{{ c.RESUELTA }}</b>Resueltas con selección</div>
+  <div class="kpi {% if c.RESUELTA_SIN_SELECCION %}alert{% endif %}"><b>{{ c.RESUELTA_SIN_SELECCION }}</b>Resueltas sin selección<br><small class="muted">revisar: no debería ocurrir</small></div>
+</div>
+
+<div class="card">
+  <h2 style="margin-top:0;">Por grupo</h2>
+  <div class="scroll"><table>
+    <thead><tr><th>Grupo</th><th>Planillas</th><th>Resueltas</th><th>Pendientes</th><th>Pendientes sin selección</th></tr></thead>
+    <tbody>
+      {% for g in overview.by_group %}
+      <tr>
+        <td><b>{{ g.grupo }}</b></td><td>{{ g.total }}</td><td>{{ g.resueltas }}</td><td>{{ g.pendientes }}</td>
+        <td>{% if g.pendientes_sin_seleccion %}<span class="num-alert">{{ g.pendientes_sin_seleccion }}</span>{% if g.pendientes_sin_seleccion == g.total %} <small class="muted">(grupo sin trabajar)</small>{% endif %}{% else %}0{% endif %}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+</div>
+
+<div class="card">
+  <div class="filters" style="display:flex;flex-wrap:wrap;gap:8px;align-items:center;">
+    <b>Mostrar:</b>
+    <a class="btn secondary {% if overview.filtro == 'sin_seleccion' %}on{% endif %}" href="/objeciones/pendientes?label={{ label }}&filtro=sin_seleccion">Sin selección</a>
+    <a class="btn secondary {% if overview.filtro == 'pendientes' %}on{% endif %}" href="/objeciones/pendientes?label={{ label }}&filtro=pendientes">Todas las pendientes</a>
+    <a class="btn secondary {% if overview.filtro == 'todas' %}on{% endif %}" href="/objeciones/pendientes?label={{ label }}&filtro=todas">Todas</a>
+    <span style="flex:1;"></span>
+    <a class="btn" href="/objeciones/pendientes/exportar?label={{ label }}&filtro={{ overview.filtro }}">Exportar a Excel (CSV)</a>
+    <a class="btn secondary" href="/objeciones/descargas/label/{{ label }}">Descargar ZIP selectivo</a>
+  </div>
+  <p class="muted">{{ overview.rows|length }} planillas en esta vista.</p>
+  {% if overview.rows %}
+  <div class="scroll"><table>
+    <thead><tr><th>Planilla</th><th>Grupo</th><th>Estado</th><th>HC</th><th>Digitalizó</th><th>Revisó</th><th>PDFs seleccionados</th><th>Selección guardada por</th><th>PDFs en disco</th></tr></thead>
+    <tbody>
+      {% for r in overview.rows %}
+      <tr>
+        <td>{{ r.tramite }}</td>
+        <td>{{ r.grupo }}</td>
+        <td>{% if r.categoria == 'PENDIENTE_SIN_SELECCION' %}<span class="badge b-ps">Pendiente sin selección</span>
+            {% elif r.categoria == 'PENDIENTE_CON_SELECCION' %}<span class="badge b-pc">Pendiente con selección</span>
+            {% elif r.categoria == 'RESUELTA_SIN_SELECCION' %}<span class="badge b-rs">Resuelta sin selección</span>
+            {% else %}<span class="badge b-r">Resuelta</span>{% endif %}</td>
+        <td>{{ r.hc }}</td>
+        <td>{{ r.digitalizo }}</td>
+        <td>{{ r.revisada_por }}</td>
+        <td>{{ r.seleccionados }}</td>
+        <td>{% if r.usuario_seleccion %}{{ r.usuario_seleccion }}<br><small class="muted">{{ r.fecha_seleccion }}</small>{% else %}<span class="muted">—</span>{% endif %}</td>
+        <td>{{ r.en_disco if r.en_disco is not none else '?' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table></div>
+  {% else %}
+  <p>Ninguna planilla en esta vista. 🎉</p>
+  {% endif %}
+</div>
+{% elif label and not error %}
+<div class="card"><p>No se encontraron planillas objetadas para el label <b>{{ label }}</b>.</p></div>
+{% endif %}
+{% endblock %}

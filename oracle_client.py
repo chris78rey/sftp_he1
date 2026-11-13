@@ -249,6 +249,26 @@ def fetch_pending_objection_downloads() -> list[dict]:
             pass
 
 
+def _repo_area_dirs() -> list[Path]:
+    """Carpetas <año>/<área> del repositorio local, listadas una sola vez.
+
+    Con ellas se comprueba cada PDF con una ruta directa (área/planilla/pdf) en vez de
+    un glob("*/*/planilla/pdf") por archivo, que recorre todo el repositorio (~0,3 s
+    cada uno) y hacía que la pantalla tardara minutos.
+    """
+    areas: list[Path] = []
+    try:
+        years = [p for p in Settings.LOCAL_REPO_ROOT.iterdir() if p.is_dir()]
+    except OSError:
+        return areas
+    for year in years:
+        try:
+            areas.extend(p for p in year.iterdir() if p.is_dir())
+        except OSError:
+            continue
+    return areas
+
+
 def fetch_saved_objection_downloads(label_objecion: str) -> list[dict]:
     """Read the current selected PDFs for one label, regardless of download status."""
     label = str(label_objecion or "").strip()
@@ -266,21 +286,25 @@ def fetch_saved_objection_downloads(label_objecion: str) -> list[dict]:
         )
         seen = set()
         out = []
+        area_dirs = _repo_area_dirs()
         for row in cur.fetchall():
             key = (str(row[1] or ""), str(row[2] or ""), str(row[3] or ""))
             if not row[1] or not row[3] or key in seen:
                 continue
-            # A selection can outlive a PDF that was later removed from the repository.
-            # Only expose files that still exist in the current local SFTP mirror.
-            if not any(
-                path.is_file()
-                for path in Settings.LOCAL_REPO_ROOT.glob(
-                    f"*/*/{key[0]}/{Path(key[2]).name}"
-                )
-            ):
-                continue
+            # Keep every saved selection visible. The local mirror only determines
+            # whether the selected PDF can currently be downloaded.
+            pdf_name = Path(key[2]).name
+            available = any(
+                (area / key[0] / pdf_name).is_file() for area in area_dirs
+            )
             seen.add(key)
-            out.append({"label": str(row[0] or label), "tramite": key[0], "grupo": key[1], "pdf": key[2]})
+            out.append({
+                "label": str(row[0] or label),
+                "tramite": key[0],
+                "grupo": key[1],
+                "pdf": key[2],
+                "disponible": available,
+            })
         return out
     finally:
         try:
@@ -294,7 +318,14 @@ def fetch_saved_objection_planillas(label_objecion: str, page: int = 1, page_siz
     groups = {}
     for row in rows:
         key = (row["tramite"], row["grupo"])
-        groups.setdefault(key, {"tramite": key[0], "grupo": key[1], "pdfs": []})["pdfs"].append(row["pdf"])
+        group = groups.setdefault(key, {
+            "tramite": key[0],
+            "grupo": key[1],
+            "pdfs": [],
+            "pdfs_disponibles": 0,
+        })
+        group["pdfs"].append({"nombre": row["pdf"], "disponible": row["disponible"]})
+        group["pdfs_disponibles"] += int(row["disponible"])
     ordered = sorted(groups.values(), key=lambda x: x["tramite"])
     page = max(1, int(page or 1))
     page_size = max(10, min(int(page_size or 50), 200))
